@@ -125,6 +125,51 @@ class TestAnalyticsEngine(unittest.TestCase):
 
             watchlist_store.delete_alert_rule(new_rule["id"], db_path=db)
 
+    def test_seo_assets_and_compressed_og_image(self):
+        import seo_tools
+
+        sitemap = seo_tools.build_sitemap_xml("http://example.com/")
+        self.assertIn("https://example.com/price-forecast", sitemap)
+        self.assertIn("https://example.com/watchlists", sitemap)
+        self.assertIn("https://example.com/reports-python", sitemap)
+
+        robots = seo_tools.build_robots_txt("https://example.com")
+        self.assertIn("Allow: /", robots)
+        self.assertIn("Disallow: /api/", robots)
+        self.assertIn("Sitemap: https://example.com/sitemap.xml", robots)
+
+        llms = seo_tools.build_llms_txt("https://example.com")
+        self.assertIn("# NaijaPrice Tracker", llms)
+        self.assertIn("https://example.com/market-arbitrage", llms)
+
+        png_bytes = seo_tools.generate_og_image_png()
+        self.assertTrue(png_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertLess(len(png_bytes), 65000)
+
+        svg = seo_tools.generate_brand_mark_svg()
+        self.assertIn("<svg", svg)
+        self.assertLess(len(svg), 1024)
+
+    def test_pwa_icons_and_manifest(self):
+        import json
+        import struct
+        import seo_tools
+
+        manifest = json.loads(seo_tools.build_manifest_json())
+        self.assertEqual(manifest["id"], "/")
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertLessEqual(len(manifest["short_name"]), 12)
+        purposes = {ic["sizes"]: ic["purpose"] for ic in manifest["icons"]}
+        self.assertIn("192x192", purposes)
+        self.assertIn("512x512", purposes)
+        self.assertTrue(any(ic["purpose"] == "maskable" for ic in manifest["icons"]))
+
+        for expected_size, maskable in [(180, False), (192, False), (512, False), (512, True)]:
+            png_bytes = seo_tools.generate_app_icon_png(expected_size, maskable=maskable)
+            self.assertTrue(png_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
+            w, h = struct.unpack(">II", png_bytes[16:24])
+            self.assertEqual((w, h), (expected_size, expected_size))
+
 
 if __name__ == "__main__":
     unittest.main()

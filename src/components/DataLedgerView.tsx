@@ -32,7 +32,6 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
   const [ledgerData, setLedgerData] = useState<LedgerResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Quick add single observation form
   const [entryDate, setEntryDate] = useState("2026-11-01");
   const [entryCommodity, setEntryCommodity] = useState(commodities[0]?.id ?? "rice_ofada");
   const [entryMarket, setEntryMarket] = useState(markets[0]?.id ?? "mile12_lagos");
@@ -129,18 +128,18 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
   return (
     <div className="space-y-5">
       {/* Custom Observation & CSV Importer */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
               Log Market Survey Observation or Import CSV
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Add field price surveys from local Nigerian markets; the Python analytics engine immediately re-runs decomposition and forecasts.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer transition-colors">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer transition-colors">
               <Upload className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Upload CSV</span>
               <input
@@ -154,7 +153,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               <button
                 type="button"
                 onClick={onClearCustomRecords}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-950 rounded-lg transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Clear {customRecords.length} Custom</span>
@@ -165,7 +164,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
 
         <form onSubmit={handleAddSingle} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
           <div>
-            <label htmlFor="obs-date" className="block text-xs font-medium text-slate-700 mb-1">
+            <label htmlFor="obs-date" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
               Period Date
             </label>
             <input
@@ -173,18 +172,18 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               type="date"
               value={entryDate}
               onChange={(e) => setEntryDate(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
             />
           </div>
           <div>
-            <label htmlFor="obs-comm" className="block text-xs font-medium text-slate-700 mb-1">
+            <label htmlFor="obs-comm" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
               Commodity
             </label>
             <select
               id="obs-comm"
               value={entryCommodity}
               onChange={(e) => setEntryCommodity(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
             >
               {commodities.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -194,14 +193,14 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
             </select>
           </div>
           <div>
-            <label htmlFor="obs-mkt" className="block text-xs font-medium text-slate-700 mb-1">
+            <label htmlFor="obs-mkt" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
               Market
             </label>
             <select
               id="obs-mkt"
               value={entryMarket}
               onChange={(e) => setEntryMarket(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
             >
               {markets.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -211,7 +210,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
             </select>
           </div>
           <div>
-            <label htmlFor="obs-price" className="block text-xs font-medium text-slate-700 mb-1">
+            <label htmlFor="obs-price" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
               Price (₦ NGN)
             </label>
             <input
@@ -222,12 +221,12 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               placeholder="e.g. 92500"
               value={entryPrice}
               onChange={(e) => setEntryPrice(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
             />
           </div>
           <button
             type="submit"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Plus className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Add Observation</span>
@@ -235,10 +234,10 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
         </form>
 
         {formMsg && (
-          <p className="mt-3 text-xs text-emerald-800 font-medium">{formMsg}</p>
+          <p className="mt-3 text-xs text-emerald-800 dark:text-emerald-400 font-medium">{formMsg}</p>
         )}
         {csvErrors.length > 0 && (
-          <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 space-y-1">
+          <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-xs text-red-800 dark:text-red-300 space-y-1">
             {csvErrors.map((err, i) => (
               <p key={i}>{err}</p>
             ))}
@@ -247,19 +246,19 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
       </section>
 
       {/* Filterable Data Ledger */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
+      <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
               Market Price Data Ledger
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Showing {rows.length} of {total.toLocaleString()} monthly records
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="relative">
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-initial min-w-[180px]">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
               <input
                 type="search"
@@ -270,7 +269,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
                   setSearch(e.target.value);
                   setOffset(0);
                 }}
-                className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
@@ -281,7 +280,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
                 setCommodityFilter(e.target.value);
                 setOffset(0);
               }}
-              className="px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
             >
               <option value="all">All Commodities</option>
               {commodities.map((c) => (
@@ -298,7 +297,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
                 setMarketFilter(e.target.value);
                 setOffset(0);
               }}
-              className="px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
             >
               <option value="all">All Markets</option>
               {markets.map((m) => (
@@ -315,7 +314,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
                 setYearFilter(e.target.value);
                 setOffset(0);
               }}
-              className="px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
             >
               <option value="all">All Years</option>
               <option value="2026">2026</option>
@@ -330,7 +329,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
-              <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 dark:text-slate-400">
                 <th className="py-2.5 pr-3">Period</th>
                 <th className="py-2.5 px-3">Commodity</th>
                 <th className="py-2.5 px-3">Unit</th>
@@ -339,39 +338,42 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
                 <th className="py-2.5 pl-3 text-right">Observed Price</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
                     <td colSpan={6} className="py-3">
-                      <div className="h-4 bg-slate-100 rounded animate-pulse w-full" />
+                      <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded animate-pulse w-full" />
                     </td>
                   </tr>
                 ))
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-500">
+                  <td colSpan={6} className="py-8 text-center text-slate-500 dark:text-slate-400">
                     No market observations match your current filters. Clear search or choose another year.
                   </td>
                 </tr>
               ) : (
                 rows.map((r, idx) => (
-                  <tr key={`${r.date}-${r.commodity_id}-${r.market_id}-${idx}`} className="hover:bg-slate-50">
-                    <td className="py-2.5 pr-3 font-mono tabular-nums text-slate-700">
+                  <tr
+                    key={`${r.date}-${r.commodity_id}-${r.market_id}-${idx}`}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  >
+                    <td className="py-2.5 pr-3 font-mono tabular-nums text-slate-700 dark:text-slate-300">
                       {formatPeriodLabel(r.date)}
                       {r.is_custom && (
-                        <span className="ml-1.5 text-[11px] font-sans font-medium text-emerald-700">
+                        <span className="ml-1.5 text-[11px] font-sans font-medium text-emerald-700 dark:text-emerald-400">
                           · Custom
                         </span>
                       )}
                     </td>
-                    <td className="py-2.5 px-3 font-medium text-slate-900">{r.commodity_name}</td>
-                    <td className="py-2.5 px-3 text-slate-500">{r.unit}</td>
-                    <td className="py-2.5 px-3 text-slate-700">{r.market_name}</td>
-                    <td className="py-2.5 px-3 text-slate-500">
+                    <td className="py-2.5 px-3 font-medium text-slate-900 dark:text-slate-100">{r.commodity_name}</td>
+                    <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400">{r.unit}</td>
+                    <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">{r.market_name}</td>
+                    <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400">
                       {r.state} · {r.region}
                     </td>
-                    <td className="py-2.5 pl-3 text-right font-mono tabular-nums font-semibold text-slate-900">
+                    <td className="py-2.5 pl-3 text-right font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100">
                       {formatNaira(r.price_ngn)}
                     </td>
                   </tr>
@@ -382,7 +384,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
         </div>
 
         {/* Pagination */}
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-600">
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
           <span className="font-mono tabular-nums">
             Page {Math.floor(offset / limit) + 1} of {Math.max(1, Math.ceil(total / limit))}
           </span>
@@ -391,7 +393,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               type="button"
               disabled={offset === 0}
               onClick={() => setOffset(Math.max(0, offset - limit))}
-              className="px-3 py-1.5 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40"
+              className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40"
             >
               Previous
             </button>
@@ -399,7 +401,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               type="button"
               disabled={offset + limit >= total}
               onClick={() => setOffset(offset + limit)}
-              className="px-3 py-1.5 border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40"
+              className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40"
             >
               Next
             </button>

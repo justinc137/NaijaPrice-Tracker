@@ -114,7 +114,6 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
   const trendPath = buildPath((p) => p.trend);
   const fittedPath = buildPath((p) => p.fitted);
 
-  // Connect last historical point to first forecast point smoothly
   const lastHistIdx = history.length - 1;
   const forecastPath = useMemo(() => {
     if (history.length === 0 || forecast.length === 0) return "";
@@ -158,13 +157,16 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
   const activeIdx = hoverIdx !== null ? hoverIdx : combined.length - 1;
 
   return (
-    <section className="bg-white border border-slate-200 rounded-xl p-5">
+    <section
+      data-testid="price-trend-chart"
+      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
             Price Trajectory &amp; {forecast.length}-Month Forecast
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             {commodityName} ({unit}) · {marketName} · {modelLabel}
           </p>
         </div>
@@ -175,8 +177,8 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             onClick={() => setShowTrend((v) => !v)}
             className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
               showTrend
-                ? "bg-slate-900 text-white border-slate-900"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                ? "bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
             }`}
           >
             12-Mo Trend
@@ -186,8 +188,8 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             onClick={() => setShowFitted((v) => !v)}
             className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
               showFitted
-                ? "bg-slate-900 text-white border-slate-900"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                ? "bg-slate-900 text-white border-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
             }`}
           >
             Model Fit
@@ -197,8 +199,8 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             onClick={() => setShowBand((v) => !v)}
             className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
               showBand
-                ? "bg-emerald-700 text-white border-emerald-700"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                ? "bg-emerald-700 text-white border-emerald-700 dark:bg-emerald-600 dark:border-emerald-600"
+                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
             }`}
           >
             95% Confidence Band
@@ -208,46 +210,46 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
 
       {/* Live readout bar for inspected month */}
       {activePoint && (
-        <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 mb-3 rounded-lg bg-slate-50 border border-slate-200/80 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 mb-3 rounded-lg bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 text-xs">
           <div className="flex items-center gap-3">
-            <span className="font-mono font-semibold text-slate-900">
+            <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">
               {formatPeriodLabel(activePoint.date)}
             </span>
-            <span className="text-slate-400" aria-hidden="true">·</span>
-            <span className="font-medium text-slate-600">
+            <span className="text-slate-400 dark:text-slate-500" aria-hidden="true">·</span>
+            <span className="font-medium text-slate-600 dark:text-slate-300">
               {activePoint.kind === "history" ? "Observed Market Price" : "Projected Forecast"}
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4 font-mono tabular-nums">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 font-mono tabular-nums">
             {activePoint.observed !== null && (
               <span>
-                <span className="text-slate-500">Price: </span>
-                <strong className="text-slate-900">{formatNaira(activePoint.observed)}</strong>
+                <span className="text-slate-500 dark:text-slate-400">Price: </span>
+                <strong className="text-slate-900 dark:text-slate-100">{formatNaira(activePoint.observed)}</strong>
               </span>
             )}
             {activePoint.trend !== null && showTrend && (
               <span>
-                <span className="text-slate-500">Trend: </span>
-                <strong className="text-slate-700">{formatNaira(activePoint.trend)}</strong>
+                <span className="text-slate-500 dark:text-slate-400">Trend: </span>
+                <strong className="text-slate-700 dark:text-slate-200">{formatNaira(activePoint.trend)}</strong>
               </span>
             )}
             {activePoint.seasonalFactor !== null && (
               <span>
-                <span className="text-slate-500">Seasonal Idx: </span>
-                <strong className="text-slate-700">{activePoint.seasonalFactor.toFixed(2)}x</strong>
+                <span className="text-slate-500 dark:text-slate-400">Seasonal Idx: </span>
+                <strong className="text-slate-700 dark:text-slate-200">{activePoint.seasonalFactor.toFixed(2)}x</strong>
               </span>
             )}
             {activePoint.predicted !== null && (
               <span>
-                <span className="text-slate-500">Forecast: </span>
-                <strong className="text-emerald-700">{formatNaira(activePoint.predicted)}</strong>
+                <span className="text-slate-500 dark:text-slate-400">Forecast: </span>
+                <strong className="text-emerald-700 dark:text-emerald-400">{formatNaira(activePoint.predicted)}</strong>
               </span>
             )}
             {activePoint.lower95 !== null && activePoint.upper95 !== null && showBand && (
               <span>
-                <span className="text-slate-500">95% CI: </span>
-                <strong className="text-slate-700">
+                <span className="text-slate-500 dark:text-slate-400">95% CI: </span>
+                <strong className="text-slate-700 dark:text-slate-200">
                   {formatNaira(activePoint.lower95)} – {formatNaira(activePoint.upper95)}
                 </strong>
               </span>
@@ -259,7 +261,9 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
       <div className="w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-auto min-w-[640px] select-none"
+          width={width}
+          height={height}
+          className="w-full h-auto min-w-[600px] select-none"
           role="img"
           aria-label={`Price trend and forecast chart for ${commodityName} at ${marketName}`}
           data-testid="price-trend-chart"
@@ -275,14 +279,14 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
                   y1={y}
                   x2={width - pad.right}
                   y2={y}
-                  stroke="#E2E8F0"
+                  className="stroke-slate-200 dark:stroke-slate-800"
                   strokeWidth="1"
                 />
                 <text
                   x={pad.left - 10}
                   y={y + 4}
                   textAnchor="end"
-                  className="fill-slate-500 text-[11px] font-mono tabular-nums"
+                  className="fill-slate-500 dark:fill-slate-400 text-[11px] font-mono tabular-nums"
                 >
                   {formatCompactNaira(tick)}
                 </text>
@@ -297,8 +301,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
               y={pad.top}
               width={Math.max(0, xFor(combined.length - 1) - xFor(lastHistIdx))}
               height={plotH}
-              fill="#F0FDF4"
-              opacity={0.55}
+              className="fill-emerald-50/70 dark:fill-emerald-950/35"
             />
           )}
 
@@ -309,7 +312,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
               y1={pad.top}
               x2={xFor(lastHistIdx)}
               y2={pad.top + plotH}
-              stroke="#15803D"
+              className="stroke-emerald-700 dark:stroke-emerald-400"
               strokeWidth="1"
               strokeDasharray="3 3"
               opacity={0.5}
@@ -318,7 +321,10 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
 
           {/* 95% confidence band */}
           {showBand && bandPolygon && (
-            <polygon points={bandPolygon} fill="#16A34A" fillOpacity={0.14} />
+            <polygon
+              points={bandPolygon}
+              className="fill-emerald-600/15 dark:fill-emerald-400/15"
+            />
           )}
 
           {/* 12-mo trendline */}
@@ -326,7 +332,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             <path
               d={trendPath}
               fill="none"
-              stroke="#64748B"
+              className="stroke-slate-500 dark:stroke-slate-400"
               strokeWidth="1.75"
               strokeDasharray="4 4"
             />
@@ -337,9 +343,9 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             <path
               d={fittedPath}
               fill="none"
-              stroke="#D97706"
+              className="stroke-amber-600 dark:stroke-amber-400"
               strokeWidth="1.5"
-              strokeOpacity={0.8}
+              strokeOpacity={0.85}
             />
           )}
 
@@ -348,7 +354,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             <path
               d={historyPath}
               fill="none"
-              stroke="#0F172A"
+              className="stroke-slate-900 dark:stroke-slate-100"
               strokeWidth="2.25"
               strokeLinejoin="round"
               strokeLinecap="round"
@@ -360,7 +366,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             <path
               d={forecastPath}
               fill="none"
-              stroke="#15803D"
+              className="stroke-emerald-700 dark:stroke-emerald-400"
               strokeWidth="2.25"
               strokeDasharray="6 4"
               strokeLinejoin="round"
@@ -381,7 +387,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
                   ? "start"
                   : "middle"
               }
-              className="fill-slate-500 text-[11px] font-mono"
+              className="fill-slate-500 dark:fill-slate-400 text-[11px] font-mono"
             >
               {formatPeriodLabel(combined[idx].date)}
             </text>
@@ -395,7 +401,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
                 y1={pad.top}
                 x2={xFor(activeIdx)}
                 y2={pad.top + plotH}
-                stroke="#94A3B8"
+                className="stroke-slate-400 dark:stroke-slate-600"
                 strokeWidth="1"
               />
               {activePoint.observed !== null && (
@@ -403,8 +409,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
                   cx={xFor(activeIdx)}
                   cy={yFor(activePoint.observed)}
                   r="4.5"
-                  fill="#0F172A"
-                  stroke="#FFFFFF"
+                  className="fill-slate-900 dark:fill-slate-100 stroke-white dark:stroke-slate-900"
                   strokeWidth="2"
                 />
               )}
@@ -413,8 +418,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
                   cx={xFor(activeIdx)}
                   cy={yFor(activePoint.predicted)}
                   r="4.5"
-                  fill="#15803D"
-                  stroke="#FFFFFF"
+                  className="fill-emerald-700 dark:fill-emerald-400 stroke-white dark:stroke-slate-900"
                   strokeWidth="2"
                 />
               )}
@@ -440,30 +444,30 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
       </div>
 
       {/* Clean horizontal legend */}
-      <div className="flex flex-wrap items-center gap-5 mt-3 pt-3 border-t border-slate-100 text-xs text-slate-600">
+      <div className="flex flex-wrap items-center gap-4 sm:gap-5 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
         <span className="inline-flex items-center gap-2">
-          <span className="w-4 h-0.5 bg-slate-900 inline-block" />
+          <span className="w-4 h-0.5 bg-slate-900 dark:bg-slate-100 inline-block" />
           Observed Price (₦)
         </span>
         {showTrend && (
           <span className="inline-flex items-center gap-2">
-            <span className="w-4 h-0 border-t-2 border-dashed border-slate-500 inline-block" />
+            <span className="w-4 h-0 border-t-2 border-dashed border-slate-500 dark:border-slate-400 inline-block" />
             12-Mo Moving Trend
           </span>
         )}
         {showFitted && (
           <span className="inline-flex items-center gap-2">
-            <span className="w-4 h-0.5 bg-amber-600 inline-block" />
+            <span className="w-4 h-0.5 bg-amber-600 dark:bg-amber-400 inline-block" />
             In-Sample Model Fit
           </span>
         )}
         <span className="inline-flex items-center gap-2">
-          <span className="w-4 h-0 border-t-2 border-dashed border-emerald-700 inline-block" />
+          <span className="w-4 h-0 border-t-2 border-dashed border-emerald-700 dark:border-emerald-400 inline-block" />
           Python Forecast
         </span>
         {showBand && (
           <span className="inline-flex items-center gap-2">
-            <span className="w-3.5 h-3 bg-emerald-600/20 border border-emerald-600/30 rounded-xs inline-block" />
+            <span className="w-3.5 h-3 bg-emerald-600/20 border border-emerald-600/30 dark:bg-emerald-400/20 dark:border-emerald-400/30 rounded-xs inline-block" />
             95% Confidence Interval
           </span>
         )}

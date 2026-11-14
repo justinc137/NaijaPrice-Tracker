@@ -7,6 +7,8 @@ import {
   CalendarRange,
   FileSpreadsheet,
   Menu,
+  Moon,
+  Sun,
   Table2,
   X,
 } from "lucide-react";
@@ -18,6 +20,8 @@ import { ReportsPythonView } from "./components/ReportsPythonView";
 import { SeasonalProfileChart } from "./components/SeasonalProfileChart";
 import { SeasonalityMatrixView } from "./components/SeasonalityMatrixView";
 import { WatchlistView, type NewAlertRulePayload } from "./components/WatchlistView";
+import { OfflineIndicator, PWAInstallButton } from "./components/PWAStatusControls";
+import { useOnlineStatus } from "./hooks/usePWA";
 import type {
   AlertRule,
   AlertsResponse,
@@ -37,18 +41,29 @@ import {
   formatPeriodLabel,
   getModelLabel,
 } from "./utils/formatters";
+import { loadOfflineSnapshot, mirrorJsonToSwCache, saveOfflineSnapshot } from "./utils/offlineCache";
+import {
+  ROUTE_SEO_LIST,
+  applyDocumentSeo,
+  getRouteMeta,
+  getSlugForTab,
+  tabFromPathname,
+} from "./utils/seo";
 
 const CUSTOM_STORAGE_KEY = "naijaprice_custom_records_v1";
 const WATCHLIST_ACTIVE_KEY = "naijaprice_active_watchlist_v1";
 const DISMISSED_ALERTS_KEY = "naijaprice_dismissed_alerts_v1";
+const THEME_STORAGE_KEY = "naijaprice_theme";
+const OFFLINE_META_KEY = "naijaprice_offline_meta_v1";
+const OFFLINE_ANALYSIS_KEY = "naijaprice_offline_analysis_v1";
 
-const NAV_ITEMS: { id: WorkspaceTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "overview", label: "Price & Forecast", icon: BarChart3 },
-  { id: "watchlists", label: "Watchlists", icon: BookmarkCheck },
-  { id: "seasonality", label: "Seasonality Matrix", icon: CalendarRange },
-  { id: "arbitrage", label: "Market Arbitrage", icon: ArrowLeftRight },
-  { id: "ledger", label: "Data Ledger", icon: Table2 },
-  { id: "reports", label: "Reports & Python", icon: FileSpreadsheet },
+const NAV_ITEMS: { id: WorkspaceTab; label: string; slug: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "overview", label: "Price & Forecast", slug: "/price-forecast", icon: BarChart3 },
+  { id: "watchlists", label: "Watchlists", slug: "/watchlists", icon: BookmarkCheck },
+  { id: "seasonality", label: "Seasonality Matrix", slug: "/seasonality-matrix", icon: CalendarRange },
+  { id: "arbitrage", label: "Market Arbitrage", slug: "/market-arbitrage", icon: ArrowLeftRight },
+  { id: "ledger", label: "Data Ledger", slug: "/data-ledger", icon: Table2 },
+  { id: "reports", label: "Reports & Python", slug: "/reports-python", icon: FileSpreadsheet },
 ];
 
 export default function App() {
@@ -57,8 +72,21 @@ export default function App() {
   const [marketId, setMarketId] = useState<string>("mile12_lagos");
   const [forecastMonths, setForecastMonths] = useState<number>(6);
   const [modelType, setModelType] = useState<ForecastModelType>("ridge_seasonal");
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(() =>
+    typeof window !== "undefined" ? tabFromPathname(window.location.pathname) : "overview"
+  );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof window === "undefined") return "light";
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved === "dark" || saved === "light") return saved;
+      return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } catch {
+      return "light";
+    }
+  });
 
   const [customRecords, setCustomRecords] = useState<CustomPriceRecord[]>(() => {
     try {
@@ -69,9 +97,18 @@ export default function App() {
     }
   });
 
-  const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+  const isOnline = useOnlineStatus();
+  const [analysis, setAnalysis] = useState<AnalysisResponse | null>(() => {
+    const snap = loadOfflineSnapshot<AnalysisResponse>(OFFLINE_ANALYSIS_KEY);
+    return snap?.value ?? null;
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [cacheMode, setCacheMode] = useState<"live" | "offline" | "offline-latest">("live");
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(() => {
+    const snap = loadOfflineSnapshot<AnalysisResponse>(OFFLINE_ANALYSIS_KEY);
+    return snap?.savedAt ?? null;
+  });
 
   const [watchlists, setWatchlists] = useState<WatchlistGroup[]>([]);
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>(() => {
@@ -91,6 +128,58 @@ export default function App() {
       return [];
     }
   });
+
+  // Sync dark mode class on <html> and persist
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // Ignore storage quota issues
+    }
+  }, [theme]);
+
+  // Listen to browser back/forward history changes for clean URL routing
+  useEffect(() => {
+    const onPopState = () => {
+      setActiveTab(tabFromPathname(window.location.pathname));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const navigateToTab = useCallback((tab: WorkspaceTab, hash?: string) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+    const targetSlug = getSlugForTab(tab);
+    const targetUrl = hash ? `${targetSlug}${hash}` : targetSlug;
+    if (window.location.pathname !== targetSlug || (hash && window.location.hash !== hash)) {
+      window.history.pushState({ tab }, "", targetUrl);
+    }
+    if (hash) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(hash.replace(/^#/, ""));
+        el?.scrollIntoView({ behavior: "smooth" });
+      });
+    }
+  }, []);
+
+  const handleSpaLinkClick = (
+    e: React.MouseEvent<HTMLAnchorElement>,
+    tab: WorkspaceTab,
+    hash?: string
+  ) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
+    e.preventDefault();
+    navigateToTab(tab, hash);
+  };
 
   useEffect(() => {
     try {
@@ -118,6 +207,10 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    const cachedMeta = loadOfflineSnapshot<DatasetMetaResponse>(OFFLINE_META_KEY);
+    if (cachedMeta) {
+      setMeta((prev) => prev ?? cachedMeta.value);
+    }
     fetch("/api/meta")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load Nigerian commodity metadata");
@@ -126,9 +219,13 @@ export default function App() {
       .then((data: DatasetMetaResponse) => {
         if (!active) return;
         setMeta(data);
+        saveOfflineSnapshot(OFFLINE_META_KEY, data);
+        void mirrorJsonToSwCache("/api/meta", "", data);
       })
       .catch((err) => {
-        if (active) setError((err as Error).message);
+        if (active && !cachedMeta) {
+          setError((err as Error).message);
+        }
       });
     return () => {
       active = false;
@@ -137,18 +234,22 @@ export default function App() {
 
   const loadAlerts = useCallback(async () => {
     try {
+      const payload = {
+        activeWatchlistId,
+        customRecords,
+      };
       const res = await fetch("/api/alerts/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          activeWatchlistId,
-          customRecords,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) return;
       const data = (await res.json()) as AlertsResponse;
       setAlertRules(data.rules);
       setTriggeredAlerts(data.alerts);
+      if (!res.headers.get("X-NaijaPrice-Cache")) {
+        void mirrorJsonToSwCache("/api/alerts/evaluate", JSON.stringify(payload), data);
+      }
     } catch {
       // Keep existing alert state on transient failure
     }
@@ -156,14 +257,15 @@ export default function App() {
 
   const loadWatchlists = useCallback(async () => {
     try {
+      const payload = {
+        forecastMonths,
+        modelType,
+        customRecords,
+      };
       const res = await fetch("/api/watchlists/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          forecastMonths,
-          modelType,
-          customRecords,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) return;
       const data = (await res.json()) as WatchlistsResponse;
@@ -173,6 +275,9 @@ export default function App() {
           ? prev
           : data.watchlists[0]?.id ?? ""
       );
+      if (!res.headers.get("X-NaijaPrice-Cache")) {
+        void mirrorJsonToSwCache("/api/watchlists/list", JSON.stringify(payload), data);
+      }
       await loadAlerts();
     } catch {
       // Keep existing watchlists on transient failure
@@ -198,13 +303,43 @@ export default function App() {
           customRecords,
         }),
       });
+      const cacheHeader = res.headers.get("X-NaijaPrice-Cache");
       const data = await res.json();
       if (!res.ok || data.error) {
         throw new Error(data.error || "Python analysis engine returned an error.");
       }
       setAnalysis(data as AnalysisResponse);
+      if (cacheHeader === "offline-latest") {
+        setCacheMode("offline-latest");
+      } else if (cacheHeader === "offline") {
+        setCacheMode("offline");
+      } else {
+        setCacheMode("live");
+        const now = Date.now();
+        setLastSyncedAt(now);
+        saveOfflineSnapshot(OFFLINE_ANALYSIS_KEY, data);
+        void mirrorJsonToSwCache(
+          "/api/analyze",
+          JSON.stringify({
+            commodityId,
+            marketId,
+            forecastMonths,
+            modelType,
+            customRecords,
+          }),
+          data
+        );
+      }
     } catch (err) {
-      setError((err as Error).message);
+      const snap = loadOfflineSnapshot<AnalysisResponse>(OFFLINE_ANALYSIS_KEY);
+      if (snap?.value) {
+        setAnalysis(snap.value);
+        setCacheMode("offline-latest");
+        setLastSyncedAt(snap.savedAt);
+        setError(null);
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setLoading(false);
     }
@@ -213,6 +348,13 @@ export default function App() {
   useEffect(() => {
     loadAnalysis();
   }, [loadAnalysis]);
+
+  useEffect(() => {
+    if (isOnline && cacheMode !== "live") {
+      void loadAnalysis();
+      void loadWatchlists();
+    }
+  }, [isOnline, cacheMode, loadAnalysis, loadWatchlists]);
 
   const handleCreateWatchlist = async (name: string, items: WatchlistItem[]) => {
     const res = await fetch("/api/watchlists", {
@@ -336,12 +478,19 @@ export default function App() {
     )
   );
 
+  // Sync page <title>, meta description, canonical URL, OpenGraph, and JSON-LD schema
+  useEffect(() => {
+    applyDocumentSeo(activeTab, activeCommodity?.name, activeMarket?.name);
+  }, [activeTab, activeCommodity?.name, activeMarket?.name]);
+
+  const routeMeta = getRouteMeta(activeTab, activeCommodity?.name, activeMarket?.name);
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex">
+    <div className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex">
       {/* Mobile Sidebar Backdrop */}
       {mobileMenuOpen && (
         <div
-          className="fixed inset-0 z-30 bg-slate-900/40 lg:hidden"
+          className="fixed inset-0 z-30 bg-slate-900/50 dark:bg-black/70 lg:hidden"
           onClick={() => setMobileMenuOpen(false)}
           aria-hidden="true"
         />
@@ -349,47 +498,60 @@ export default function App() {
 
       {/* Workspace Sidebar */}
       <aside
-        className={`no-print fixed lg:static inset-y-0 left-0 z-40 w-[264px] shrink-0 bg-white border-r border-slate-200 flex flex-col justify-between transition-transform duration-150 lg:translate-x-0 ${
+        className={`no-print fixed lg:static inset-y-0 left-0 z-40 w-[264px] shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-transform duration-150 lg:translate-x-0 ${
           mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="p-5 space-y-6 overflow-y-auto">
           <div className="flex items-center justify-between gap-2">
-            <div>
-              <h1 className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap">
-                NaijaPrice Tracker
-              </h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Nigerian Agro-Market Analytics
-              </p>
-            </div>
+            <a
+              href="/price-forecast"
+              onClick={(e) => handleSpaLinkClick(e, "overview")}
+              className="flex items-center gap-2.5 min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-md"
+            >
+              <img
+                src="/brand-mark.svg"
+                alt="NaijaPrice Tracker Nigerian agro-market analytics logo"
+                width={28}
+                height={28}
+                loading="eager"
+                decoding="async"
+                className="w-7 h-7 rounded-md shrink-0"
+              />
+              <div className="min-w-0">
+                <span className="block font-display text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                  NaijaPrice Tracker
+                </span>
+                <span className="block text-[11px] text-slate-500 dark:text-slate-400">
+                  Nigerian Agro-Market Analytics
+                </span>
+              </div>
+            </a>
             <button
               type="button"
               onClick={() => setMobileMenuOpen(false)}
-              className="lg:hidden p-1.5 rounded-md text-slate-500 hover:bg-slate-100"
+              className="lg:hidden p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
               aria-label="Close navigation menu"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
 
-          {/* Primary Navigation */}
+          {/* Primary Navigation (Semantic Internal Links) */}
           <nav aria-label="Primary sections" className="space-y-1">
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
-                <button
+                <a
                   key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setMobileMenuOpen(false);
-                  }}
+                  href={item.slug}
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={(e) => handleSpaLinkClick(e, item.id)}
                   className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
                     isActive
-                      ? "bg-emerald-700 text-white"
-                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                      ? "bg-emerald-700 text-white dark:bg-emerald-600"
+                      : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
@@ -401,17 +563,17 @@ export default function App() {
                         }`
                       : ""}
                   </span>
-                </button>
+                </a>
               );
             })}
           </nav>
 
           {/* Analysis Parameter Controls */}
-          <div className="pt-5 border-t border-slate-200 space-y-4">
+          <div className="pt-5 border-t border-slate-200 dark:border-slate-800 space-y-4">
             <div>
               <label
                 htmlFor="commodity-select"
-                className="block text-xs font-medium text-slate-700 mb-1.5"
+                className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
               >
                 Commodity
               </label>
@@ -419,7 +581,7 @@ export default function App() {
                 id="commodity-select"
                 value={commodityId}
                 onChange={(e) => setCommodityId(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
                 {(meta?.commodities ?? []).map((c) => (
                   <option key={c.id} value={c.id}>
@@ -428,7 +590,7 @@ export default function App() {
                 ))}
               </select>
               {activeCommodity && (
-                <p className="text-[11px] text-slate-500 mt-1">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                   Unit: {activeCommodity.unit} · {activeCommodity.category}
                 </p>
               )}
@@ -437,7 +599,7 @@ export default function App() {
             <div>
               <label
                 htmlFor="market-select"
-                className="block text-xs font-medium text-slate-700 mb-1.5"
+                className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
               >
                 Nigerian Market
               </label>
@@ -445,7 +607,7 @@ export default function App() {
                 id="market-select"
                 value={marketId}
                 onChange={(e) => setMarketId(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
                 {(meta?.markets ?? []).map((m) => (
                   <option key={m.id} value={m.id}>
@@ -456,10 +618,10 @@ export default function App() {
             </div>
 
             <div>
-              <span className="block text-xs font-medium text-slate-700 mb-1.5">
+              <span className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                 Forecast Horizon
               </span>
-              <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-lg">
+              <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
                 {[3, 6, 9, 12].map((h) => (
                   <button
                     key={h}
@@ -467,8 +629,8 @@ export default function App() {
                     onClick={() => setForecastMonths(h)}
                     className={`py-1.5 text-xs font-mono font-medium rounded-md transition-colors whitespace-nowrap ${
                       forecastMonths === h
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 shadow-sm"
+                        : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
                     }`}
                   >
                     {h}m
@@ -480,7 +642,7 @@ export default function App() {
             <div>
               <label
                 htmlFor="model-select"
-                className="block text-xs font-medium text-slate-700 mb-1.5"
+                className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
               >
                 Python Forecasting Model
               </label>
@@ -488,7 +650,7 @@ export default function App() {
                 id="model-select"
                 value={modelType}
                 onChange={(e) => setModelType(e.target.value as ForecastModelType)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
                 <option value="ridge_seasonal">Ridge + Seasonal Dummies</option>
                 <option value="poly_seasonal">Polynomial + Fourier Harmonics</option>
@@ -499,13 +661,13 @@ export default function App() {
         </div>
 
         {/* Quiet Dataset Coverage Footer inside Sidebar */}
-        <div className="p-4 border-t border-slate-200 text-xs text-slate-500 space-y-1">
-          <div className="font-medium text-slate-700">Dataset Coverage</div>
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 space-y-1">
+          <div className="font-medium text-slate-700 dark:text-slate-300">Dataset Coverage</div>
           <div className="font-mono tabular-nums">
             {meta ? `${meta.totalRecords.toLocaleString()} rows · ${meta.dateRange.months} mos` : "Loading dataset..."}
           </div>
           {customRecords.length > 0 && (
-            <div className="text-emerald-700 font-medium">
+            <div className="text-emerald-700 dark:text-emerald-400 font-medium">
               +{customRecords.length} custom survey row(s)
             </div>
           )}
@@ -514,45 +676,98 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Top Bar Contract: Breadcrumb on left, 1 primary action on right */}
-        <header className="no-print bg-white border-b border-slate-200 px-5 lg:px-7 py-3.5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+        {/* Top Bar Contract: Breadcrumb on left, theme toggle + Export Report on right */}
+        <header className="no-print bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 sm:px-5 lg:px-7 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100"
+              className="lg:hidden p-2 -ml-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
               aria-label="Open navigation menu"
             >
-              <Menu className="w-4 h-4" />
+              <Menu className="w-4 h-4" aria-hidden="true" />
             </button>
-            <div className="flex items-center gap-2 text-xs text-slate-500 truncate">
-              <span className="font-medium text-slate-700">Nigerian Markets</span>
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 sm:gap-2 text-xs text-slate-500 dark:text-slate-400 min-w-0 truncate">
+              <a
+                href="/price-forecast"
+                onClick={(e) => handleSpaLinkClick(e, "overview")}
+                className="font-medium text-slate-700 dark:text-slate-300 hover:underline shrink-0"
+              >
+                Nigerian Markets
+              </a>
               <span aria-hidden="true">/</span>
-              <span className="truncate">{activeMarket?.name ?? marketId}</span>
-              <span aria-hidden="true">/</span>
-              <span className="font-semibold text-slate-900 truncate">
+              <span className="truncate hidden sm:inline">{activeMarket?.name ?? marketId}</span>
+              <span aria-hidden="true" className="hidden sm:inline">/</span>
+              <span className="font-semibold text-slate-900 dark:text-slate-100 truncate">
                 {activeCommodity?.name ?? commodityId}
               </span>
+            </nav>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <PWAInstallButton />
+
+            <button
+              type="button"
+              onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap"
+            >
+              {theme === "dark" ? (
+                <Sun className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+              ) : (
+                <Moon className="w-3.5 h-3.5 text-slate-600" aria-hidden="true" />
+              )}
+              <span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"}</span>
+            </button>
+
+            <a
+              href="/reports-python"
+              onClick={(e) => handleSpaLinkClick(e, "reports")}
+              className="px-3 sm:px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              Export Report
+            </a>
+          </div>
+        </header>
+
+        <main className="flex-1 p-4 sm:p-5 lg:p-7 max-w-[1320px] w-full mx-auto space-y-5">
+          {/* Single Page H1 + SEO-aligned View Context */}
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                {routeMeta.h1}
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {routeMeta.description}
+              </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab("reports")}
-            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
-          >
-            Export Report
-          </button>
-        </header>
+          <OfflineIndicator
+            isOnline={isOnline}
+            cacheMode={cacheMode}
+            lastSyncedAt={lastSyncedAt}
+            cachedSeriesContext={
+              analysis &&
+              (analysis.meta.commodityId !== commodityId || analysis.meta.marketId !== marketId)
+                ? `${analysis.meta.commodityName} · ${analysis.meta.marketName}`
+                : null
+            }
+            onRetrySync={() => {
+              void loadAnalysis();
+              void loadWatchlists();
+            }}
+          />
 
-        <main className="flex-1 p-5 lg:p-7 max-w-[1320px] w-full mx-auto space-y-5">
           {unacknowledgedAlerts.length > 0 && (
             <AlertBanner
               alerts={unacknowledgedAlerts}
               onInspectAlert={(cid, mid) => {
                 setCommodityId(cid);
                 setMarketId(mid);
-                setActiveTab("overview");
+                navigateToTab("overview");
               }}
               onDismissAlert={(key) =>
                 setDismissedAlertKeys((prev) => (prev.includes(key) ? prev : [...prev, key]))
@@ -562,16 +777,16 @@ export default function App() {
                   ...new Set([...prev, ...unacknowledgedAlerts.map(getAlertDismissKey)]),
                 ])
               }
-              onOpenRules={() => setActiveTab("watchlists")}
+              onOpenRules={() => navigateToTab("watchlists", "#alert-rules-section")}
             />
           )}
 
           {error && (
             <div
               role="alert"
-              className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3"
+              className="bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3"
             >
-              <p className="text-sm text-red-800">{error}</p>
+              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
               <button
                 type="button"
                 onClick={loadAnalysis}
@@ -588,11 +803,11 @@ export default function App() {
                 {Array.from({ length: 4 }).map((_, idx) => (
                   <div
                     key={idx}
-                    className="h-24 bg-white border border-slate-200 rounded-xl p-4 animate-pulse"
+                    className="h-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 animate-pulse"
                   />
                 ))}
               </div>
-              <div className="h-96 bg-white border border-slate-200 rounded-xl animate-pulse" />
+              <div className="h-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl animate-pulse" />
             </div>
           ) : (
             analysis && (
@@ -604,66 +819,68 @@ export default function App() {
                       aria-label="Key commodity metrics"
                       className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
                     >
-                      <div className="bg-white border border-slate-200 rounded-xl p-4">
-                        <div className="text-xs font-medium text-slate-500">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
                           Latest Spot Price · {formatPeriodLabel(analysis.meta.latestDate)}
                         </div>
-                        <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 mt-1.5">
+                        <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100 mt-1.5">
                           {formatNaira(analysis.kpis.latestPriceNgn)}
                         </div>
-                        <div className="text-xs text-slate-600 mt-1.5 font-mono tabular-nums">
+                        <div className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 font-mono tabular-nums">
                           <span
                             className={
-                              analysis.kpis.momPct >= 0 ? "text-amber-700 font-medium" : "text-emerald-700 font-medium"
+                              analysis.kpis.momPct >= 0
+                                ? "text-amber-700 dark:text-amber-400 font-medium"
+                                : "text-emerald-700 dark:text-emerald-400 font-medium"
                             }
                           >
                             {formatPercent(analysis.kpis.momPct)} MoM
                           </span>
-                          <span className="mx-1.5 text-slate-300" aria-hidden="true">·</span>
+                          <span className="mx-1.5 text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
                           <span>{formatPercent(analysis.kpis.yoyPct)} YoY</span>
                         </div>
                       </div>
 
-                      <div className="bg-white border border-slate-200 rounded-xl p-4">
-                        <div className="text-xs font-medium text-slate-500">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
                           {forecastMonths}-Month Projection ({getModelLabel(modelType).split(" ")[0]})
                         </div>
-                        <div className="text-2xl font-bold font-mono tabular-nums text-emerald-700 mt-1.5">
+                        <div className="text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1.5">
                           {formatNaira(analysis.kpis.projectedEndNgn)}
                         </div>
-                        <div className="text-xs text-slate-600 mt-1.5 font-mono tabular-nums">
+                        <div className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 font-mono tabular-nums">
                           <span>{formatPercent(analysis.kpis.projectedChangePct)} vs spot</span>
-                          <span className="mx-1.5 text-slate-300" aria-hidden="true">·</span>
+                          <span className="mx-1.5 text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
                           <span>12M Avg {formatNaira(analysis.kpis.avg12mNgn)}</span>
                         </div>
                       </div>
 
-                      <div className="bg-white border border-slate-200 rounded-xl p-4">
-                        <div className="text-xs font-medium text-slate-500">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
                           Seasonal Peak / Trough
                         </div>
-                        <div className="text-xl font-bold text-slate-900 mt-1.5">
+                        <div className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-1.5">
                           {analysis.seasonality.peakMonth}{" "}
-                          <span className="text-slate-400 font-normal">/</span>{" "}
+                          <span className="text-slate-400 dark:text-slate-500 font-normal">/</span>{" "}
                           {analysis.seasonality.troughMonth}
                         </div>
-                        <div className="text-xs text-slate-600 mt-2 font-mono tabular-nums">
+                        <div className="text-xs text-slate-600 dark:text-slate-300 mt-2 font-mono tabular-nums">
                           <span>Strength {analysis.seasonality.strengthPct.toFixed(0)}%</span>
-                          <span className="mx-1.5 text-slate-300" aria-hidden="true">·</span>
+                          <span className="mx-1.5 text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
                           <span>Spread {analysis.seasonality.seasonalSpreadPct.toFixed(1)}%</span>
                         </div>
                       </div>
 
-                      <div className="bg-white border border-slate-200 rounded-xl p-4">
-                        <div className="text-xs font-medium text-slate-500">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
                           Python Holdout Backtest ({analysis.backtest.samples}M)
                         </div>
-                        <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 mt-1.5">
+                        <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100 mt-1.5">
                           {analysis.backtest.mape.toFixed(2)}% MAPE
                         </div>
-                        <div className="text-xs text-slate-600 mt-1.5 font-mono tabular-nums">
+                        <div className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 font-mono tabular-nums">
                           <span>RMSE {formatNaira(analysis.backtest.rmse)}</span>
-                          <span className="mx-1.5 text-slate-300" aria-hidden="true">·</span>
+                          <span className="mx-1.5 text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
                           <span>CV {analysis.kpis.volatilityPct.toFixed(1)}%</span>
                         </div>
                       </div>
@@ -693,46 +910,46 @@ export default function App() {
                         />
                       </div>
 
-                      <section className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between space-y-5">
+                      <section className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 flex flex-col justify-between space-y-5">
                         <div className="space-y-4">
                           <div>
-                            <div className="text-xs font-medium text-emerald-700">
+                            <div className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
                               Decision Guidance · {analysis.insights.traderSignal}
                             </div>
-                            <h2 className="text-base font-semibold text-slate-900 mt-1">
+                            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 mt-1">
                               Trader &amp; Student Brief
                             </h2>
-                            <p className="text-xs text-slate-600 leading-relaxed mt-1.5">
+                            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1.5">
                               {analysis.insights.traderSummary}
                             </p>
-                            <p className="text-xs text-slate-500 leading-relaxed mt-2.5 pt-2.5 border-t border-slate-100">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
                               {analysis.insights.studentNote}
                             </p>
                           </div>
 
-                          <div className="pt-3 border-t border-slate-200">
+                          <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
                             <div className="flex items-center justify-between mb-2.5">
-                              <h3 className="text-xs font-semibold text-slate-900">
+                              <h3 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                                 Regional Market Spread ({analysis.meta.commodityName})
                               </h3>
-                              <button
-                                type="button"
-                                onClick={() => setActiveTab("arbitrage")}
-                                className="text-xs font-medium text-emerald-700 hover:underline"
+                              <a
+                                href="/market-arbitrage"
+                                onClick={(e) => handleSpaLinkClick(e, "arbitrage")}
+                                className="text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:underline whitespace-nowrap"
                               >
                                 Full arbitrage →
-                              </button>
+                              </a>
                             </div>
-                            <div className="divide-y divide-slate-100 text-xs">
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                               {analysis.marketComparison.slice(0, 4).map((m) => (
                                 <div
                                   key={m.marketId}
                                   className="py-2 flex items-center justify-between gap-2"
                                 >
-                                  <span className="text-slate-700 truncate">
+                                  <span className="text-slate-700 dark:text-slate-300 truncate">
                                     {m.marketName}
                                   </span>
-                                  <span className="font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                                  <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
                                     {formatNaira(m.price_ngn)}
                                   </span>
                                 </div>
@@ -741,9 +958,9 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                          <span className="text-slate-500">National Spread</span>
-                          <span className="font-mono tabular-nums font-semibold text-slate-900">
+                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                          <span className="text-slate-500 dark:text-slate-400">National Spread</span>
+                          <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100">
                             {formatNaira(analysis.arbitrage.spreadNgn)} ({formatPercent(analysis.arbitrage.spreadPct, false)})
                           </span>
                         </div>
@@ -753,21 +970,21 @@ export default function App() {
                     {/* Personalized Watchlist Performance Highlight Panel */}
                     <section
                       aria-label="Monitored watchlist performance"
-                      className="bg-white border border-slate-200 rounded-xl p-5"
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <h2 className="text-base font-semibold text-slate-900">
+                            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                               Monitored Watchlist Highlights
                             </h2>
                             {activeWatchlist && (
-                              <span className="text-xs text-slate-500">
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
                                 · {activeWatchlist.name}
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                             Live spot prices, momentum, and {forecastMonths}-month projections for your selected commodities and markets.
                           </p>
                         </div>
@@ -778,7 +995,7 @@ export default function App() {
                               aria-label="Select active watchlist"
                               value={activeWatchlist?.id ?? ""}
                               onChange={(e) => setActiveWatchlistId(e.target.value)}
-                              className="px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+                              className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
                             >
                               {watchlists.map((wl) => (
                                 <option key={wl.id} value={wl.id}>
@@ -796,8 +1013,8 @@ export default function App() {
                               }
                               className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                                 isCurrentPairMonitored
-                                  ? "bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800"
-                                  : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                                  ? "bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:border-emerald-600"
+                                  : "bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
                               }`}
                             >
                               {isCurrentPairMonitored
@@ -806,18 +1023,18 @@ export default function App() {
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("watchlists")}
-                            className="px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                          <a
+                            href="/watchlists"
+                            onClick={(e) => handleSpaLinkClick(e, "watchlists")}
+                            className="px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 rounded-lg transition-colors whitespace-nowrap shrink-0"
                           >
                             Manage Watchlists →
-                          </button>
+                          </a>
                         </div>
                       </div>
 
                       {!activeWatchlist || activeWatchlist.performance.length === 0 ? (
-                        <div className="py-6 text-center text-xs text-slate-500 border-t border-slate-100">
+                        <div className="py-6 text-center text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800">
                           No items in your active watchlist yet. Click "+ Monitor Current Pair" or open Manage Watchlists to select commodities and markets.
                         </div>
                       ) : (
@@ -840,28 +1057,30 @@ export default function App() {
                                 }}
                                 className={`text-left p-3.5 rounded-lg border transition-colors ${
                                   isFocused
-                                    ? "bg-emerald-50/60 border-emerald-300"
+                                    ? "bg-emerald-50/60 border-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-700"
                                     : itemAlert
-                                    ? "bg-amber-50/40 border-amber-200 hover:bg-amber-50/70"
-                                    : "bg-slate-50/60 border-slate-200 hover:bg-slate-100/70"
+                                    ? "bg-amber-50/40 border-amber-200 hover:bg-amber-50/70 dark:bg-amber-950/30 dark:border-amber-800 dark:hover:bg-amber-950/50"
+                                    : "bg-slate-50/60 border-slate-200 hover:bg-slate-100/70 dark:bg-slate-800/50 dark:border-slate-700 dark:hover:bg-slate-800"
                                 }`}
                               >
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                    <div className="text-xs font-semibold text-slate-900 truncate">
+                                    <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
                                       {item.commodityName}
                                     </div>
-                                    <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
                                       {item.marketName} · {item.unit}
                                     </div>
                                   </div>
                                   <div className="text-right font-mono tabular-nums shrink-0">
-                                    <div className="text-sm font-bold text-slate-900">
+                                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
                                       {formatNaira(item.latestPriceNgn)}
                                     </div>
                                     <div
                                       className={`text-[11px] font-medium ${
-                                        item.momPct >= 0 ? "text-amber-700" : "text-emerald-700"
+                                        item.momPct >= 0
+                                          ? "text-amber-700 dark:text-amber-400"
+                                          : "text-emerald-700 dark:text-emerald-400"
                                       }`}
                                     >
                                       {formatPercent(item.momPct)} MoM
@@ -873,8 +1092,8 @@ export default function App() {
                                   <div
                                     className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${
                                       itemAlert.severity === "critical"
-                                        ? "text-red-700"
-                                        : "text-amber-700"
+                                        ? "text-red-700 dark:text-red-400"
+                                        : "text-amber-700 dark:text-amber-400"
                                     }`}
                                   >
                                     <AlertTriangle className="w-3 h-3 shrink-0" aria-hidden="true" />
@@ -885,11 +1104,11 @@ export default function App() {
                                   </div>
                                 )}
 
-                                <div className="mt-2.5 pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px]">
-                                  <span className="text-slate-600">
+                                <div className="mt-2.5 pt-2 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="text-slate-600 dark:text-slate-300 truncate">
                                     {item.seasonalPhase} · {item.traderSignal}
                                   </span>
-                                  <span className="font-mono tabular-nums text-emerald-700 font-medium">
+                                  <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-400 font-medium shrink-0">
                                     {forecastMonths}M: {formatNaira(item.projectedEndNgn)}
                                   </span>
                                 </div>
@@ -918,7 +1137,7 @@ export default function App() {
                     onInspectPair={(cid, mid) => {
                       setCommodityId(cid);
                       setMarketId(mid);
-                      setActiveTab("overview");
+                      navigateToTab("overview");
                     }}
                     onCreateAlertRule={handleCreateAlertRule}
                     onToggleAlertRule={handleToggleAlertRule}
@@ -933,7 +1152,7 @@ export default function App() {
                     selectedCommodityId={commodityId}
                     onSelectCommodity={(cid) => {
                       setCommodityId(cid);
-                      setActiveTab("overview");
+                      navigateToTab("overview");
                     }}
                   />
                 )}
@@ -971,6 +1190,22 @@ export default function App() {
               </>
             )
           )}
+
+          {/* Clean Internal Linking Footer */}
+          <footer className="no-print pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+            <nav aria-label="Workspace sections" className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              {ROUTE_SEO_LIST.map((r) => (
+                <a
+                  key={r.tab}
+                  href={r.slug}
+                  onClick={(e) => handleSpaLinkClick(e, r.tab)}
+                  className="hover:text-emerald-700 dark:hover:text-emerald-400 hover:underline"
+                >
+                  {r.navLabel}
+                </a>
+              ))}
+            </nav>
+          </footer>
         </main>
       </div>
     </div>
