@@ -1,0 +1,6 @@
+{
+  "name": "NaijaPrice Tracker",
+  "description": "Interactive agricultural commodity price trend analysis, seasonality detection, forecasting, and exportable market intelligence across Nigerian markets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
