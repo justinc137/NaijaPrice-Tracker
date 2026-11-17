@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Plus, Search, Trash2, Upload } from "lucide-react";
+import { Download, Plus, Search, Trash2, Upload } from "lucide-react";
 import type {
   CommodityMeta,
   CustomPriceRecord,
@@ -7,14 +7,16 @@ import type {
   MarketMeta,
 } from "../types/market";
 import { parseCustomPriceCsv } from "../utils/csvParser";
+import { buildCsvUploadTemplate } from "../utils/forecastHelpers";
 import { formatNaira, formatPeriodLabel } from "../utils/formatters";
 
 interface DataLedgerViewProps {
   commodities: CommodityMeta[];
   markets: MarketMeta[];
   customRecords: CustomPriceRecord[];
-  onAddCustomRecords: (records: CustomPriceRecord[]) => void;
-  onClearCustomRecords: () => void;
+  onAddCustomRecords: (records: CustomPriceRecord[]) => Promise<void> | void;
+  onDeleteCustomRecord?: (id: string) => Promise<void> | void;
+  onClearCustomRecords: () => Promise<void> | void;
 }
 
 export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
@@ -22,6 +24,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
   markets,
   customRecords,
   onAddCustomRecords,
+  onDeleteCustomRecord,
   onClearCustomRecords,
 }) => {
   const [commodityFilter, setCommodityFilter] = useState("all");
@@ -71,7 +74,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
     };
   }, [commodityFilter, marketFilter, yearFilter, search, offset, customRecords]);
 
-  const handleAddSingle = (e: React.FormEvent) => {
+  const handleAddSingle = async (e: React.FormEvent) => {
     e.preventDefault();
     const numericPrice = Number(entryPrice);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) {
@@ -87,7 +90,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
     const mkt = markets.find((m) => m.id === entryMarket);
     if (!comm || !mkt) return;
 
-    onAddCustomRecords([
+    await onAddCustomRecords([
       {
         date: entryDate,
         commodity_id: comm.id,
@@ -109,17 +112,30 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const text = String(reader.result ?? "");
       const parsed = parseCustomPriceCsv(text, commodities, markets);
       setCsvErrors(parsed.errors);
       if (parsed.records.length > 0) {
-        onAddCustomRecords(parsed.records);
-        setFormMsg(`Imported ${parsed.records.length} observation(s) into Python engine.`);
+        await onAddCustomRecords(parsed.records);
+        setFormMsg(`Imported ${parsed.records.length} observation(s) into SQLite & Python engine.`);
       }
     };
     reader.readAsText(file);
     e.target.value = "";
+  };
+
+  const handleDownloadTemplate = () => {
+    const csv = buildCsvUploadTemplate(commodities, markets, entryCommodity, entryMarket);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "naijaprice_live_survey_template.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   const rows = ledgerData?.rows ?? [];
@@ -135,11 +151,19 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               Log Market Survey Observation or Import CSV
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Add field price surveys from local Nigerian markets; the Python analytics engine immediately re-runs decomposition and forecasts.
+              Add field price surveys from local Nigerian markets; the Python analytics engine immediately re-runs decomposition, model benchmarks, and threshold alerts.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer transition-colors">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>CSV Template</span>
+            </button>
+            <label className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg cursor-pointer transition-colors whitespace-nowrap shrink-0">
               <Upload className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Upload CSV</span>
               <input
@@ -152,8 +176,8 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
             {customRecords.length > 0 && (
               <button
                 type="button"
-                onClick={onClearCustomRecords}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-950 rounded-lg transition-colors"
+                onClick={() => void onClearCustomRecords()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-950 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Clear {customRecords.length} Custom</span>
@@ -374,7 +398,19 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
                       {r.state} · {r.region}
                     </td>
                     <td className="py-2.5 pl-3 text-right font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100">
-                      {formatNaira(r.price_ngn)}
+                      <span className="inline-flex items-center gap-2">
+                        <span>{formatNaira(r.price_ngn)}</span>
+                        {r.is_custom && r.custom_id && onDeleteCustomRecord && (
+                          <button
+                            type="button"
+                            onClick={() => void onDeleteCustomRecord(r.custom_id!)}
+                            aria-label={`Remove custom entry ${r.commodity_name} on ${r.date}`}
+                            className="p-1 text-slate-400 hover:text-red-700 dark:hover:text-red-400 rounded transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" aria-hidden="true" />
+                          </button>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))

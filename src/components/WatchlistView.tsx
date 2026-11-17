@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { AlertTriangle, ArrowUpRight, BellRing, BookmarkPlus, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Bell, BellRing, BookmarkPlus, Plus, Trash2 } from "lucide-react";
 import type {
   AlertBaselineType,
   AlertDirection,
   AlertRule,
+  AlertRuleType,
   CommodityMeta,
   MarketMeta,
   PriceAlert,
@@ -14,9 +15,11 @@ import { formatNaira, formatPercent, formatPeriodLabel } from "../utils/formatte
 
 export interface NewAlertRulePayload {
   name: string;
+  ruleType?: AlertRuleType;
   baselineType: AlertBaselineType;
   direction: AlertDirection;
   thresholdPct: number;
+  targetPriceNgn?: number | null;
   watchlistId: string;
   commodityId: string;
   marketId: string;
@@ -30,6 +33,8 @@ interface WatchlistViewProps {
   forecastMonths: number;
   alertRules: AlertRule[];
   triggeredAlerts: PriceAlert[];
+  notificationPermission?: NotificationPermission | "unsupported";
+  onRequestBrowserNotifications?: () => Promise<void>;
   onSelectWatchlist: (id: string) => void;
   onCreateWatchlist: (name: string, items: WatchlistItem[]) => Promise<void>;
   onDeleteWatchlist: (id: string) => Promise<void>;
@@ -48,6 +53,8 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
   forecastMonths,
   alertRules,
   triggeredAlerts,
+  notificationPermission = "unsupported",
+  onRequestBrowserNotifications,
   onSelectWatchlist,
   onCreateWatchlist,
   onDeleteWatchlist,
@@ -74,21 +81,61 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
   const [quickMarket, setQuickMarket] = useState(markets[0]?.id ?? "mile12_lagos");
 
   const [ruleName, setRuleName] = useState("");
+  const [ruleType, setRuleType] = useState<AlertRuleType>("price_target");
   const [ruleBaseline, setRuleBaseline] = useState<AlertBaselineType>("avg_12m");
-  const [ruleDirection, setRuleDirection] = useState<AlertDirection>("both");
+  const [ruleDirection, setRuleDirection] = useState<AlertDirection>("above");
   const [ruleThresholdPct, setRuleThresholdPct] = useState<number>(12);
-  const [ruleCommodity, setRuleCommodity] = useState<string>("all");
-  const [ruleMarket, setRuleMarket] = useState<string>("all");
+  const [ruleTargetPrice, setRuleTargetPrice] = useState<string>("95000");
+  const [ruleCommodity, setRuleCommodity] = useState<string>(commodities[0]?.id ?? "rice_ofada");
+  const [ruleMarket, setRuleMarket] = useState<string>(markets[0]?.id ?? "mile12_lagos");
   const [ruleError, setRuleError] = useState<string | null>(null);
   const [ruleSaving, setRuleSaving] = useState(false);
+
+  const handleRuleTypeSwitch = (nextType: AlertRuleType) => {
+    setRuleType(nextType);
+    setRuleError(null);
+    if (nextType === "price_target" && ruleDirection === "both") {
+      setRuleDirection("above");
+    }
+  };
 
   const handleCreateRuleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = ruleName.trim();
     if (!clean) {
-      setRuleError("Enter a descriptive rule name (for example, Lagos Tomato Spike).");
+      setRuleError("Enter a descriptive rule name (for example, Lagos Tomato Ceiling).");
       return;
     }
+
+    if (ruleType === "price_target") {
+      const targetVal = Number(ruleTargetPrice);
+      if (!Number.isFinite(targetVal) || targetVal <= 0) {
+        setRuleError("Target price in Naira (₦) must be greater than 0.");
+        return;
+      }
+      setRuleError(null);
+      setRuleSaving(true);
+      try {
+        await onCreateAlertRule({
+          name: clean,
+          ruleType: "price_target",
+          baselineType: "price_target",
+          direction: ruleDirection === "below" ? "below" : "above",
+          thresholdPct: 0,
+          targetPriceNgn: Math.round(targetVal),
+          watchlistId: "all",
+          commodityId: ruleCommodity,
+          marketId: ruleMarket,
+        });
+        setRuleName("");
+      } catch (err) {
+        setRuleError((err as Error).message);
+      } finally {
+        setRuleSaving(false);
+      }
+      return;
+    }
+
     if (!Number.isFinite(ruleThresholdPct) || ruleThresholdPct <= 0 || ruleThresholdPct > 200) {
       setRuleError("Threshold percentage must be between 1% and 200%.");
       return;
@@ -98,6 +145,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
     try {
       await onCreateAlertRule({
         name: clean,
+        ruleType: "deviation_pct",
         baselineType: ruleBaseline,
         direction: ruleDirection,
         thresholdPct: ruleThresholdPct,
@@ -515,15 +563,38 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Threshold Price Deviation Alerts
+              User-Defined Price Threshold &amp; Deviation Alerts
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Python continuously compares monitored watchlist items against their trailing 12-month average, linear trendline, or all-time mean.
+              Set exact Naira (₦) price targets for any commodity &amp; market, or monitor percentage deviations against historical averages and trendlines.
             </p>
           </div>
-          <span className="text-xs font-mono tabular-nums font-medium text-slate-700 dark:text-slate-300">
-            {triggeredAlerts.length} active alert(s) · {alertRules.filter((r) => r.enabled).length} enabled rule(s)
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            {notificationPermission !== "unsupported" && onRequestBrowserNotifications && (
+              <button
+                type="button"
+                onClick={() => void onRequestBrowserNotifications()}
+                disabled={notificationPermission === "granted"}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                  notificationPermission === "granted"
+                    ? "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300"
+                    : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Bell className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>
+                  {notificationPermission === "granted"
+                    ? "Browser Alerts Enabled"
+                    : notificationPermission === "denied"
+                    ? "Browser Alerts Blocked"
+                    : "Enable Browser Alerts"}
+                </span>
+              </button>
+            )}
+            <span className="text-xs font-mono tabular-nums font-medium text-slate-700 dark:text-slate-300">
+              {triggeredAlerts.length} active alert(s) · {alertRules.filter((r) => r.enabled).length} enabled rule(s)
+            </span>
+          </div>
         </div>
 
         {/* Triggered Alerts Table */}
@@ -539,8 +610,8 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                   <th className="py-2 pr-3">Severity</th>
                   <th className="py-2 px-3">Commodity &amp; Market</th>
                   <th className="py-2 px-3 text-right">Spot Price</th>
-                  <th className="py-2 px-3 text-right">Baseline</th>
-                  <th className="py-2 px-3 text-right">Deviation</th>
+                  <th className="py-2 px-3 text-right">Threshold / Baseline</th>
+                  <th className="py-2 px-3 text-right">Spread</th>
                   <th className="py-2 px-3">Rule Matched</th>
                   <th className="py-2 pl-3 text-right">Action</th>
                 </tr>
@@ -548,6 +619,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {triggeredAlerts.map((al) => {
                   const isCritical = al.severity === "critical";
+                  const isTarget = al.ruleType === "price_target";
                   return (
                     <tr key={al.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       <td className="py-2.5 pr-3 whitespace-nowrap">
@@ -597,7 +669,9 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                       <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
                         {al.ruleName}
                         <span className="block text-[11px] text-slate-500 dark:text-slate-400">
-                          Threshold ±{al.thresholdPct}%
+                          {isTarget
+                            ? `Target ${formatNaira(al.targetPriceNgn ?? al.baselineNgn)}`
+                            : `Threshold ±${al.thresholdPct}%`}
                         </span>
                       </td>
                       <td className="py-2.5 pl-3 text-right">
@@ -619,10 +693,41 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
         )}
 
         {/* Configure New Alert Rule */}
-        <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">
-            Add Threshold Alert Rule
-          </h3>
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Add Price Threshold Alert Rule
+            </h3>
+            <div
+              role="group"
+              aria-label="Alert rule type"
+              className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs"
+            >
+              <button
+                type="button"
+                onClick={() => handleRuleTypeSwitch("price_target")}
+                className={`px-3 py-1.5 font-medium rounded-md transition-colors whitespace-nowrap ${
+                  ruleType === "price_target"
+                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                Exact Price Target (₦ NGN)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRuleTypeSwitch("deviation_pct")}
+                className={`px-3 py-1.5 font-medium rounded-md transition-colors whitespace-nowrap ${
+                  ruleType === "deviation_pct"
+                    ? "bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                % Deviation from Baseline
+              </button>
+            </div>
+          </div>
+
           <form onSubmit={handleCreateRuleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
             <div className="lg:col-span-2">
               <label htmlFor="alert-rule-name" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -631,32 +736,38 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
               <input
                 id="alert-rule-name"
                 type="text"
-                placeholder="e.g. Lagos Tomato Surge"
+                placeholder={
+                  ruleType === "price_target"
+                    ? "e.g. Lagos Rice Target ₦105k"
+                    : "e.g. Lagos Tomato Surge"
+                }
                 value={ruleName}
                 onChange={(e) => setRuleName(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
-            <div>
-              <label htmlFor="alert-rule-baseline" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Baseline
-              </label>
-              <select
-                id="alert-rule-baseline"
-                value={ruleBaseline}
-                onChange={(e) => setRuleBaseline(e.target.value as AlertBaselineType)}
-                className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
-              >
-                <option value="avg_12m">12-Mo Average</option>
-                <option value="trend">Linear Trendline</option>
-                <option value="avg_all">All-Time Mean</option>
-              </select>
-            </div>
+            {ruleType === "deviation_pct" && (
+              <div>
+                <label htmlFor="alert-rule-baseline" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Baseline
+                </label>
+                <select
+                  id="alert-rule-baseline"
+                  value={ruleBaseline}
+                  onChange={(e) => setRuleBaseline(e.target.value as AlertBaselineType)}
+                  className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
+                >
+                  <option value="avg_12m">12-Mo Average</option>
+                  <option value="trend">Linear Trendline</option>
+                  <option value="avg_all">All-Time Mean</option>
+                </select>
+              </div>
+            )}
 
             <div>
               <label htmlFor="alert-rule-direction" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Direction
+                Condition
               </label>
               <select
                 id="alert-rule-direction"
@@ -664,27 +775,48 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                 onChange={(e) => setRuleDirection(e.target.value as AlertDirection)}
                 className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
               >
-                <option value="both">Above or Below</option>
-                <option value="above">Spike Above (+)</option>
-                <option value="below">Dip Below (-)</option>
+                {ruleType === "deviation_pct" && <option value="both">Above or Below</option>}
+                <option value="above">
+                  {ruleType === "price_target" ? "At or above (≥ ₦)" : "Spike Above (+)"}
+                </option>
+                <option value="below">
+                  {ruleType === "price_target" ? "At or below (≤ ₦)" : "Dip Below (-)"}
+                </option>
               </select>
             </div>
 
-            <div>
-              <label htmlFor="alert-rule-pct" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Deviation (%)
-              </label>
-              <input
-                id="alert-rule-pct"
-                type="number"
-                min={1}
-                max={200}
-                step={1}
-                value={ruleThresholdPct}
-                onChange={(e) => setRuleThresholdPct(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
-              />
-            </div>
+            {ruleType === "price_target" ? (
+              <div className="lg:col-span-2">
+                <label htmlFor="alert-rule-target-ngn" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Target Price (₦ NGN)
+                </label>
+                <input
+                  id="alert-rule-target-ngn"
+                  type="number"
+                  min={100}
+                  step={100}
+                  value={ruleTargetPrice}
+                  onChange={(e) => setRuleTargetPrice(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+              </div>
+            ) : (
+              <div>
+                <label htmlFor="alert-rule-pct" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Deviation (%)
+                </label>
+                <input
+                  id="alert-rule-pct"
+                  type="number"
+                  min={1}
+                  max={200}
+                  step={1}
+                  value={ruleThresholdPct}
+                  onChange={(e) => setRuleThresholdPct(Number(e.target.value))}
+                  className="w-full px-3 py-2 text-xs font-mono tabular-nums bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
+                />
+              </div>
+            )}
 
             <button
               type="submit"
@@ -705,7 +837,9 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                 onChange={(e) => setRuleCommodity(e.target.value)}
                 className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
               >
-                <option value="all">All Monitored Commodities</option>
+                <option value="all">
+                  {ruleType === "price_target" ? "All Commodities" : "All Monitored Commodities"}
+                </option>
                 {commodities.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -724,7 +858,9 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                 onChange={(e) => setRuleMarket(e.target.value)}
                 className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
               >
-                <option value="all">All Monitored Markets</option>
+                <option value="all">
+                  {ruleType === "price_target" ? "All Markets" : "All Monitored Markets"}
+                </option>
                 {markets.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name}
@@ -750,24 +886,31 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
             {alertRules.map((rule) => {
               const commLabel =
                 rule.commodityId === "all"
-                  ? "All monitored commodities"
+                  ? "All commodities"
                   : commodities.find((c) => c.id === rule.commodityId)?.name ?? rule.commodityId;
               const mktLabel =
                 rule.marketId === "all"
-                  ? "All monitored markets"
+                  ? "All markets"
                   : markets.find((m) => m.id === rule.marketId)?.name ?? rule.marketId;
-              const baseLabel =
-                rule.baselineType === "avg_12m"
-                  ? "12M Avg"
-                  : rule.baselineType === "trend"
-                  ? "Linear Trend"
-                  : "All-Time Mean";
-              const dirLabel =
-                rule.direction === "above"
-                  ? `+${rule.thresholdPct}% above`
-                  : rule.direction === "below"
-                  ? `-${rule.thresholdPct}% below`
-                  : `±${rule.thresholdPct}%`;
+
+              const triggerSummary =
+                rule.ruleType === "price_target" && rule.targetPriceNgn
+                  ? `Price ${rule.direction === "below" ? "≤" : "≥"} ${formatNaira(
+                      rule.targetPriceNgn
+                    )}`
+                  : `${
+                      rule.direction === "above"
+                        ? `+${rule.thresholdPct}% above`
+                        : rule.direction === "below"
+                        ? `-${rule.thresholdPct}% below`
+                        : `±${rule.thresholdPct}%`
+                    } ${
+                      rule.baselineType === "avg_12m"
+                        ? "12M Avg"
+                        : rule.baselineType === "trend"
+                        ? "Linear Trend"
+                        : "All-Time Mean"
+                    }`;
 
               return (
                 <div
@@ -788,7 +931,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                      Trigger {dirLabel} {baseLabel} · {commLabel} · {mktLabel}
+                      Trigger {triggerSummary} · {commLabel} · {mktLabel}
                     </div>
                   </div>
 

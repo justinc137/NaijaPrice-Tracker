@@ -263,6 +263,43 @@ async function startServer() {
     }
   });
 
+  app.get("/api/observations", async (_req, res) => {
+    try {
+      const result = await runPythonEngine("observations_list");
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post("/api/observations", async (req, res) => {
+    try {
+      const records = Array.isArray(req.body?.records) ? req.body.records : [];
+      const result = await runPythonEngine("observations_upsert", { records });
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/api/observations/:id", async (req, res) => {
+    try {
+      const result = await runPythonEngine("observations_delete", { id: req.params.id });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.delete("/api/observations", async (_req, res) => {
+    try {
+      const result = await runPythonEngine("observations_clear", {});
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   app.post("/api/watchlists/list", async (req, res) => {
     try {
       const result = await runPythonEngine("watchlist_list", req.body ?? {});

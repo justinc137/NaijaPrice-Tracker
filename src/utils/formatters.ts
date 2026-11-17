@@ -57,6 +57,27 @@ export function getModelLabel(modelType: string): string {
       return "Polynomial + Fourier Harmonics";
     case "holt_winters":
       return "Holt-Winters Multiplicative";
+    case "sarima":
+      return "Seasonal ARIMA (1,1,1)(1,1,0)[12]";
+    case "prophet_gam":
+      return "Prophet GAM (Changepoints + Fourier)";
+    default:
+      return modelType;
+  }
+}
+
+export function getShortModelLabel(modelType: string): string {
+  switch (modelType) {
+    case "ridge_seasonal":
+      return "Ridge";
+    case "poly_seasonal":
+      return "Poly Fourier";
+    case "holt_winters":
+      return "Holt-Winters";
+    case "sarima":
+      return "Seasonal ARIMA";
+    case "prophet_gam":
+      return "Prophet GAM";
     default:
       return modelType;
   }

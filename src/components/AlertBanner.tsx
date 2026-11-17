@@ -103,8 +103,13 @@ export const AlertBanner: React.FC<AlertBannerProps> = ({
                   {formatNaira(al.latestPriceNgn)}
                 </span>
                 <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300">
-                  ({formatPercent(al.deviationPct)} vs {al.baselineLabel}{" "}
-                  {formatNaira(al.baselineNgn)})
+                  {al.ruleType === "price_target"
+                    ? `(Target ${formatNaira(al.targetPriceNgn ?? al.baselineNgn)} · ${formatPercent(
+                        al.deviationPct
+                      )})`
+                    : `(${formatPercent(al.deviationPct)} vs ${al.baselineLabel} ${formatNaira(
+                        al.baselineNgn
+                      )})`}
                 </span>
               </div>
 

@@ -1,4 +1,9 @@
-export type ForecastModelType = "ridge_seasonal" | "poly_seasonal" | "holt_winters";
+export type ForecastModelType =
+  | "ridge_seasonal"
+  | "poly_seasonal"
+  | "holt_winters"
+  | "sarima"
+  | "prophet_gam";
 
 export type WorkspaceTab =
   | "overview"
@@ -82,6 +87,25 @@ export interface CommoditySeasonalityRow {
   months: SeasonalProfileItem[];
 }
 
+export interface ModelComparisonForecastPoint {
+  date: string;
+  predicted_ngn: number;
+}
+
+export interface ModelComparisonEntry {
+  modelType: ForecastModelType;
+  label: string;
+  family: "Basic" | "Advanced";
+  mae: number;
+  rmse: number;
+  mape: number;
+  samples: number;
+  projectedEndNgn: number;
+  projectedChangePct: number;
+  isBest: boolean;
+  forecast: ModelComparisonForecastPoint[];
+}
+
 export interface AnalysisResponse {
   meta: {
     commodityId: string;
@@ -125,6 +149,7 @@ export interface AnalysisResponse {
     samples: number;
   };
   modelType: ForecastModelType;
+  modelComparison?: ModelComparisonEntry[];
   marketComparison: MarketComparisonItem[];
   arbitrage: {
     cheapest: MarketComparisonItem | null;
@@ -141,6 +166,7 @@ export interface AnalysisResponse {
 }
 
 export interface CustomPriceRecord {
+  id?: string;
   date: string;
   commodity_id: string;
   commodity_name: string;
@@ -151,12 +177,14 @@ export interface CustomPriceRecord {
   state: string;
   region: string;
   price_ngn: number;
+  createdAt?: string;
 }
 
 export interface LedgerRow extends CustomPriceRecord {
   year: number;
   month: number;
   is_custom: boolean;
+  custom_id?: string | null;
 }
 
 export interface LedgerResponse {
@@ -201,7 +229,8 @@ export interface WatchlistsResponse {
   watchlists: WatchlistGroup[];
 }
 
-export type AlertBaselineType = "avg_12m" | "avg_all" | "trend";
+export type AlertRuleType = "deviation_pct" | "price_target";
+export type AlertBaselineType = "avg_12m" | "avg_all" | "trend" | "price_target";
 export type AlertDirection = "both" | "above" | "below";
 export type AlertSeverity = "warning" | "critical";
 
@@ -211,9 +240,11 @@ export interface AlertRule {
   watchlistId: string;
   commodityId: string;
   marketId: string;
+  ruleType?: AlertRuleType;
   baselineType: AlertBaselineType;
   direction: AlertDirection;
   thresholdPct: number;
+  targetPriceNgn?: number | null;
   enabled: boolean;
   createdAt: string;
 }
@@ -222,6 +253,7 @@ export interface PriceAlert {
   id: string;
   ruleId: string;
   ruleName: string;
+  ruleType?: AlertRuleType;
   watchlistName: string;
   commodityId: string;
   commodityName: string;
@@ -234,6 +266,7 @@ export interface PriceAlert {
   baselineType: AlertBaselineType;
   baselineLabel: string;
   baselineNgn: number;
+  targetPriceNgn?: number | null;
   deviationPct: number;
   thresholdPct: number;
   zScore: number;

@@ -1,21 +1,26 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeftRight,
   BarChart3,
+  BellRing,
   BookmarkCheck,
   CalendarRange,
   FileSpreadsheet,
   Menu,
   Moon,
+  Plus,
   Sun,
   Table2,
   X,
 } from "lucide-react";
 import { AlertBanner, getAlertDismissKey } from "./components/AlertBanner";
 import { DataLedgerView } from "./components/DataLedgerView";
+import { LivePriceInputPanel } from "./components/LivePriceInputPanel";
 import { MarketArbitrageView } from "./components/MarketArbitrageView";
+import { ModelComparisonPanel } from "./components/ModelComparisonPanel";
 import { PriceTrendChart } from "./components/PriceTrendChart";
+import { QuickPriceAlertPanel } from "./components/QuickPriceAlertPanel";
 import { ReportsPythonView } from "./components/ReportsPythonView";
 import { SeasonalProfileChart } from "./components/SeasonalProfileChart";
 import { SeasonalityMatrixView } from "./components/SeasonalityMatrixView";
@@ -40,7 +45,9 @@ import {
   formatPercent,
   formatPeriodLabel,
   getModelLabel,
+  getShortModelLabel,
 } from "./utils/formatters";
+import { findNewlyTriggeredAlerts, getAlertNotificationKey } from "./utils/forecastHelpers";
 import { loadOfflineSnapshot, mirrorJsonToSwCache, saveOfflineSnapshot } from "./utils/offlineCache";
 import {
   ROUTE_SEO_LIST,
@@ -120,6 +127,19 @@ export default function App() {
   });
   const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
   const [triggeredAlerts, setTriggeredAlerts] = useState<PriceAlert[]>([]);
+  const [toastAlerts, setToastAlerts] = useState<PriceAlert[]>([]);
+  const knownAlertKeysRef = useRef<Set<string>>(new Set());
+  const alertsInitializedRef = useRef(false);
+  const [showLiveInput, setShowLiveInput] = useState(false);
+  const [showQuickAlert, setShowQuickAlert] = useState(false);
+  const [showModelOverlay, setShowModelOverlay] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | "unsupported"
+  >(() =>
+    typeof window !== "undefined" && "Notification" in window
+      ? Notification.permission
+      : "unsupported"
+  );
   const [dismissedAlertKeys, setDismissedAlertKeys] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(DISMISSED_ALERTS_KEY);
@@ -128,6 +148,15 @@ export default function App() {
       return [];
     }
   });
+
+  // Auto-dismiss live alert toasts after 12 seconds
+  useEffect(() => {
+    if (toastAlerts.length === 0) return;
+    const timer = window.setTimeout(() => {
+      setToastAlerts([]);
+    }, 12000);
+    return () => window.clearTimeout(timer);
+  }, [toastAlerts]);
 
   // Sync dark mode class on <html> and persist
   useEffect(() => {
@@ -232,7 +261,84 @@ export default function App() {
     };
   }, []);
 
-  const loadAlerts = useCallback(async () => {
+  // Load persisted custom survey observations from SQLite on startup
+  useEffect(() => {
+    let active = true;
+    fetch("/api/observations")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { observations?: CustomPriceRecord[] } | null) => {
+        if (!active || !data || !Array.isArray(data.observations)) return;
+        setCustomRecords(data.observations);
+      })
+      .catch(() => {
+        // Keep local fallback when offline
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleRequestBrowserNotifications = useCallback(async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      setNotificationPermission(perm);
+    } catch {
+      // Ignore permission request cancellation
+    }
+  }, []);
+
+  const applyAlertUpdate = useCallback((nextAlerts: PriceAlert[], emitNotifications: boolean) => {
+    if (!alertsInitializedRef.current) {
+      alertsInitializedRef.current = true;
+      knownAlertKeysRef.current = new Set(nextAlerts.map(getAlertNotificationKey));
+      setTriggeredAlerts(nextAlerts);
+      return;
+    }
+
+    if (emitNotifications) {
+      const newlyTriggered = findNewlyTriggeredAlerts(
+        [],
+        nextAlerts,
+        knownAlertKeysRef.current
+      );
+      if (newlyTriggered.length > 0) {
+        setToastAlerts((prev) => {
+          const existingIds = new Set(prev.map(getAlertNotificationKey));
+          const additions = newlyTriggered.filter(
+            (a) => !existingIds.has(getAlertNotificationKey(a))
+          );
+          return [...additions, ...prev].slice(0, 4);
+        });
+        if (
+          typeof window !== "undefined" &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
+          for (const al of newlyTriggered.slice(0, 2)) {
+            try {
+              new Notification(`NaijaPrice Alert: ${al.commodityName}`, {
+                body: al.message,
+                icon: "/pwa-192x192.png",
+              });
+            } catch {
+              // Ignore restricted notification context
+            }
+          }
+        }
+      }
+    }
+
+    for (const al of nextAlerts) {
+      knownAlertKeysRef.current.add(getAlertNotificationKey(al));
+    }
+    setTriggeredAlerts(nextAlerts);
+  }, []);
+
+  const loadAlerts = useCallback(async (emitNotifications = false) => {
     try {
       const payload = {
         activeWatchlistId,
@@ -246,14 +352,14 @@ export default function App() {
       if (!res.ok) return;
       const data = (await res.json()) as AlertsResponse;
       setAlertRules(data.rules);
-      setTriggeredAlerts(data.alerts);
+      applyAlertUpdate(data.alerts, emitNotifications);
       if (!res.headers.get("X-NaijaPrice-Cache")) {
         void mirrorJsonToSwCache("/api/alerts/evaluate", JSON.stringify(payload), data);
       }
     } catch {
       // Keep existing alert state on transient failure
     }
-  }, [activeWatchlistId, customRecords]);
+  }, [activeWatchlistId, customRecords, applyAlertUpdate]);
 
   const loadWatchlists = useCallback(async () => {
     try {
@@ -429,7 +535,7 @@ export default function App() {
       throw new Error(data.error || "Failed to create alert rule");
     }
     setAlertRules(data.rules);
-    setTriggeredAlerts(data.alerts);
+    applyAlertUpdate(data.alerts, true);
   };
 
   const handleToggleAlertRule = async (id: string, enabled: boolean) => {
@@ -441,7 +547,7 @@ export default function App() {
     if (!res.ok) return;
     const data = (await res.json()) as AlertsResponse;
     setAlertRules(data.rules);
-    setTriggeredAlerts(data.alerts);
+    applyAlertUpdate(data.alerts, enabled);
   };
 
   const handleDeleteAlertRule = async (id: string) => {
@@ -453,19 +559,55 @@ export default function App() {
     if (!res.ok) return;
     const data = (await res.json()) as AlertsResponse;
     setAlertRules(data.rules);
-    setTriggeredAlerts(data.alerts);
+    applyAlertUpdate(data.alerts, false);
   };
 
   const unacknowledgedAlerts = triggeredAlerts.filter(
     (al) => !dismissedAlertKeys.includes(getAlertDismissKey(al))
   );
 
-  const handleAddCustomRecords = (newRows: CustomPriceRecord[]) => {
-    setCustomRecords((prev) => [...prev, ...newRows]);
+  const handleAddCustomRecords = async (newRows: CustomPriceRecord[]) => {
+    const res = await fetch("/api/observations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records: newRows }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || "Failed to save market observation");
+    }
+    const updatedObs = (data.observations ?? []) as CustomPriceRecord[];
+    setCustomRecords(updatedObs);
+    // Evaluate alerts immediately against newly submitted observations so notifications fire cleanly
+    const evalPayload = { activeWatchlistId, customRecords: updatedObs };
+    const evalRes = await fetch("/api/alerts/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evalPayload),
+    });
+    if (evalRes.ok) {
+      const evalData = (await evalRes.json()) as AlertsResponse;
+      setAlertRules(evalData.rules);
+      applyAlertUpdate(evalData.alerts, true);
+    }
   };
 
-  const handleClearCustomRecords = () => {
-    setCustomRecords([]);
+  const handleDeleteCustomRecord = async (id: string) => {
+    const res = await fetch(`/api/observations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { observations?: CustomPriceRecord[] };
+    if (Array.isArray(data.observations)) {
+      setCustomRecords(data.observations);
+    }
+  };
+
+  const handleClearCustomRecords = async () => {
+    const res = await fetch("/api/observations", { method: "DELETE" });
+    if (res.ok) {
+      setCustomRecords([]);
+    }
   };
 
   const activeCommodity = meta?.commodities.find((c) => c.id === commodityId);
@@ -652,9 +794,15 @@ export default function App() {
                 onChange={(e) => setModelType(e.target.value as ForecastModelType)}
                 className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
-                <option value="ridge_seasonal">Ridge + Seasonal Dummies</option>
-                <option value="poly_seasonal">Polynomial + Fourier Harmonics</option>
-                <option value="holt_winters">Holt-Winters Multiplicative</option>
+                <optgroup label="Basic Forecasting Models">
+                  <option value="ridge_seasonal">Ridge + Seasonal Dummies</option>
+                  <option value="poly_seasonal">Polynomial + Fourier Harmonics</option>
+                  <option value="holt_winters">Holt-Winters Multiplicative</option>
+                </optgroup>
+                <optgroup label="Advanced Time-Series Models">
+                  <option value="sarima">Seasonal ARIMA (1,1,1)(1,1,0)[12]</option>
+                  <option value="prophet_gam">Prophet GAM (Changepoints + Fourier)</option>
+                </optgroup>
               </select>
             </div>
           </div>
@@ -733,8 +881,8 @@ export default function App() {
         </header>
 
         <main className="flex-1 p-4 sm:p-5 lg:p-7 max-w-[1320px] w-full mx-auto space-y-5">
-          {/* Single Page H1 + SEO-aligned View Context */}
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+          {/* Single Page H1 + Quick Actions (Live Price Input & Price Alert) */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
                 {routeMeta.h1}
@@ -743,6 +891,44 @@ export default function App() {
                 {routeMeta.description}
               </p>
             </div>
+
+            {activeTab === "overview" && meta && analysis && (
+              <div className="no-print flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLiveInput((v) => !v);
+                    setShowQuickAlert(false);
+                  }}
+                  aria-expanded={showLiveInput}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                    showLiveInput
+                      ? "bg-emerald-700 text-white border-emerald-700 dark:bg-emerald-600 dark:border-emerald-600"
+                      : "bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Log Live Price</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickAlert((v) => !v);
+                    setShowLiveInput(false);
+                  }}
+                  aria-expanded={showQuickAlert}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                    showQuickAlert
+                      ? "bg-amber-600 text-white border-amber-600"
+                      : "bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <BellRing className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Set Price Alert</span>
+                </button>
+              </div>
+            )}
           </div>
 
           <OfflineIndicator
@@ -814,6 +1000,33 @@ export default function App() {
               <>
                 {activeTab === "overview" && (
                   <div className="space-y-5">
+                    {showLiveInput && meta && (
+                      <LivePriceInputPanel
+                        commodities={meta.commodities}
+                        markets={meta.markets}
+                        activeCommodityId={commodityId}
+                        activeMarketId={marketId}
+                        latestDate={analysis.meta.latestDate}
+                        latestPriceNgn={analysis.kpis.latestPriceNgn}
+                        onSubmitRecords={handleAddCustomRecords}
+                        onClose={() => setShowLiveInput(false)}
+                      />
+                    )}
+
+                    {showQuickAlert && meta && (
+                      <QuickPriceAlertPanel
+                        commodities={meta.commodities}
+                        markets={meta.markets}
+                        activeCommodityId={commodityId}
+                        activeMarketId={marketId}
+                        latestPriceNgn={analysis.kpis.latestPriceNgn}
+                        notificationPermission={notificationPermission}
+                        onRequestBrowserNotifications={handleRequestBrowserNotifications}
+                        onCreateAlertRule={handleCreateAlertRule}
+                        onClose={() => setShowQuickAlert(false)}
+                      />
+                    )}
+
                     {/* 4-Column KPI Strip */}
                     <section
                       aria-label="Key commodity metrics"
@@ -843,7 +1056,7 @@ export default function App() {
 
                       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
                         <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                          {forecastMonths}-Month Projection ({getModelLabel(modelType).split(" ")[0]})
+                          {forecastMonths}-Month Projection ({getShortModelLabel(modelType)})
                         </div>
                         <div className="text-2xl font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1.5">
                           {formatNaira(analysis.kpis.projectedEndNgn)}
@@ -894,7 +1107,22 @@ export default function App() {
                       unit={analysis.meta.unit}
                       marketName={analysis.meta.marketName}
                       modelLabel={getModelLabel(analysis.modelType)}
+                      activeModelType={analysis.modelType}
+                      comparisonModels={analysis.modelComparison}
+                      showModelOverlay={showModelOverlay}
                     />
+
+                    {/* Model Accuracy Comparison: Basic vs. Advanced (SARIMA & Prophet GAM) */}
+                    {analysis.modelComparison && analysis.modelComparison.length > 0 && (
+                      <ModelComparisonPanel
+                        models={analysis.modelComparison}
+                        activeModel={modelType}
+                        forecastMonths={forecastMonths}
+                        showChartOverlay={showModelOverlay}
+                        onToggleChartOverlay={() => setShowModelOverlay((v) => !v)}
+                        onSelectModel={(nextModel) => setModelType(nextModel)}
+                      />
+                    )}
 
                     {/* Secondary Row: 12-Month Seasonality + Trader/Student Briefing & Arbitrage */}
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 items-stretch">
@@ -1130,6 +1358,8 @@ export default function App() {
                     forecastMonths={forecastMonths}
                     alertRules={alertRules}
                     triggeredAlerts={triggeredAlerts}
+                    notificationPermission={notificationPermission}
+                    onRequestBrowserNotifications={handleRequestBrowserNotifications}
                     onSelectWatchlist={(id) => setActiveWatchlistId(id)}
                     onCreateWatchlist={handleCreateWatchlist}
                     onDeleteWatchlist={handleDeleteWatchlist}
@@ -1176,6 +1406,7 @@ export default function App() {
                     markets={meta.markets}
                     customRecords={customRecords}
                     onAddCustomRecords={handleAddCustomRecords}
+                    onDeleteCustomRecord={handleDeleteCustomRecord}
                     onClearCustomRecords={handleClearCustomRecords}
                   />
                 )}
@@ -1208,6 +1439,77 @@ export default function App() {
           </footer>
         </main>
       </div>
+
+      {/* Live Threshold Alert Notification Stack */}
+      {toastAlerts.length > 0 && (
+        <aside
+          aria-live="polite"
+          aria-label="Real-time price alert notifications"
+          data-testid="alert-notification-stack"
+          className="no-print fixed bottom-4 right-4 z-50 w-[min(360px,calc(100vw-2rem))] space-y-2"
+        >
+          {toastAlerts.map((al) => {
+            const key = getAlertNotificationKey(al);
+            const isCritical = al.severity === "critical";
+            return (
+              <div
+                key={key}
+                role="status"
+                className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 shadow-lg rounded-xl p-3.5 space-y-2"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {isCritical ? (
+                      <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <BellRing className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                      Threshold Triggered · {al.ruleName}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setToastAlerts((prev) =>
+                        prev.filter((item) => getAlertNotificationKey(item) !== key)
+                      )
+                    }
+                    aria-label="Dismiss notification"
+                    className="p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded"
+                  >
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+                  {al.message}
+                </p>
+
+                <div className="flex items-center justify-between pt-1 text-[11px]">
+                  <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100">
+                    Spot: {formatNaira(al.latestPriceNgn)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommodityId(al.commodityId);
+                      setMarketId(al.marketId);
+                      navigateToTab("overview");
+                      setToastAlerts((prev) =>
+                        prev.filter((item) => getAlertNotificationKey(item) !== key)
+                      );
+                    }}
+                    className="font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+                  >
+                    Inspect Market →
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </aside>
+      )}
     </div>
   );
 }

@@ -27,7 +27,7 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "nigerian_commodity_
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def load_dataset(custom_records=None):
+def load_dataset(custom_records=None, include_db_observations=True, db_path=None):
     rows = []
     if os.path.exists(DATA_PATH):
         with open(DATA_PATH, "r", encoding="utf-8") as f:
@@ -47,12 +47,22 @@ def load_dataset(custom_records=None):
                     "region": r["region"],
                     "price_ngn": float(r["price_ngn"]),
                     "is_custom": False,
+                    "custom_id": None,
                 })
 
-    if custom_records:
+    db_records = []
+    if include_db_observations:
+        try:
+            kwargs = {"db_path": db_path} if db_path else {}
+            db_records = watchlist_store.list_custom_observations(**kwargs)
+        except Exception:
+            db_records = []
+
+    merged_custom = list(db_records) + list(custom_records or [])
+    if merged_custom:
         # Merge or override matching (date, commodity_id, market_id)
         index = {(r["date"], r["commodity_id"], r["market_id"]): i for i, r in enumerate(rows)}
-        for cr in custom_records:
+        for cr in merged_custom:
             d = str(cr["date"])[:10]
             parts = d.split("-")
             yr = int(parts[0])
@@ -72,6 +82,7 @@ def load_dataset(custom_records=None):
                 "region": cr.get("region", "Custom"),
                 "price_ngn": float(cr["price_ngn"]),
                 "is_custom": True,
+                "custom_id": cr.get("id"),
             }
             if key in index:
                 rows[index[key]] = entry
@@ -166,12 +177,32 @@ def features_poly_fourier(t_vals, months, total_len):
     return rows
 
 
+def fit_ridge_weighted(X, y, penalties):
+    """Fits Ridge Regression with per-feature L2 regularization penalties."""
+    n_samples = len(X)
+    n_features = len(X[0])
+    XtX = [[0.0] * n_features for _ in range(n_features)]
+    Xty = [0.0] * n_features
+
+    for i in range(n_samples):
+        xi = X[i]
+        yi = y[i]
+        for j in range(n_features):
+            Xty[j] += xi[j] * yi
+            for k in range(n_features):
+                XtX[j][k] += xi[j] * xi[k]
+
+    for j in range(n_features):
+        XtX[j][j] += penalties[j]
+
+    return solve_linear_system(XtX, Xty)
+
+
 def fit_predict_holt_winters(prices, horizon):
     """Multiplicative Holt-Winters with 12-month seasonality."""
     n = len(prices)
     season_len = 12
     if n < 24:
-        # Fallback to damped trend if series too short
         avg = statistics.mean(prices)
         return [avg] * n, [avg] * horizon
 
@@ -200,6 +231,181 @@ def fit_predict_holt_winters(prices, horizon):
     return fitted, forecasts
 
 
+def fit_predict_sarima(prices, horizon):
+    """
+    Pure-Python Seasonal ARIMA(1,1,1)(1,1,0)[12] estimated on log prices
+    via Hannan-Rissanen two-stage conditional least squares.
+    """
+    n = len(prices)
+    y = [math.log(max(p, 1.0)) for p in prices]
+    s = 12
+
+    if n < 28:
+        # Short-series fallback: AR(1) on first differences
+        if n < 4:
+            avg = statistics.mean(prices)
+            return [avg] * n, [avg] * horizon
+        diffs = [y[i] - y[i - 1] for i in range(1, n)]
+        X_short = [[1.0, diffs[i - 1]] for i in range(1, len(diffs))]
+        y_short = diffs[1:]
+        w = fit_ridge_regression(X_short, y_short, alpha=1.5)
+        fitted = [prices[0]]
+        for i in range(1, n):
+            d_hat = w[0] + (w[1] * diffs[i - 2] if i >= 2 else 0.0)
+            fitted.append(math.exp(y[i - 1] + d_hat))
+        last_y = y[-1]
+        last_d = diffs[-1]
+        preds = []
+        for _ in range(horizon):
+            next_d = w[0] + w[1] * last_d
+            last_y = last_y + next_d
+            last_d = next_d
+            preds.append(math.exp(last_y))
+        return fitted, preds
+
+    # Compute seasonal + regular differenced series w_t = (y_t - y_{t-1}) - (y_{t-12} - y_{t-13})
+    w_map = {}
+    for t in range(s + 1, n):
+        w_map[t] = (y[t] - y[t - 1]) - (y[t - s] - y[t - s - 1])
+
+    # Stage 1: AR(p=1, P=1 at lag 12) to estimate initial innovations e_t
+    start_t = 2 * s + 1
+    X1, y1, t1_idx = [], [], []
+    for t in range(start_t, n):
+        X1.append([1.0, w_map[t - 1], w_map[t - s]])
+        y1.append(w_map[t])
+        t1_idx.append(t)
+
+    w1 = fit_ridge_weighted(X1, y1, [0.0, 2.5, 2.5])
+    resid = {}
+    for xi, yi, t in zip(X1, y1, t1_idx):
+        pred_w = sum(a * b for a, b in zip(xi, w1))
+        resid[t] = yi - pred_w
+
+    # Stage 2: Hannan-Rissanen ARMA(1,1)(1,0)[12] including lagged innovation e_{t-1}
+    X2, y2 = [], []
+    for t in range(start_t + 1, n):
+        X2.append([1.0, w_map[t - 1], w_map[t - s], resid.get(t - 1, 0.0)])
+        y2.append(w_map[t])
+
+    if X2:
+        c, phi1, Phi1, theta1 = fit_ridge_weighted(X2, y2, [0.05, 3.0, 3.0, 4.0])
+    else:
+        c, phi1, Phi1, theta1 = w1[0], w1[1], w1[2], 0.0
+
+    # Clamp AR/MA weights for stationarity & stability over 12-month rollouts
+    phi1 = max(-0.75, min(0.75, phi1))
+    Phi1 = max(-0.75, min(0.75, Phi1))
+    theta1 = max(-0.65, min(0.65, theta1))
+
+    # Reconstruct 1-step in-sample fitted values
+    fitted = []
+    eps_hist = {}
+    for t in range(n):
+        if t < start_t:
+            fitted.append(prices[t])
+            continue
+        w_hat = (
+            c
+            + phi1 * w_map[t - 1]
+            + Phi1 * w_map[t - s]
+            + theta1 * eps_hist.get(t - 1, 0.0)
+        )
+        eps_hist[t] = w_map[t] - w_hat
+        y_hat = y[t - 1] + (y[t - s] - y[t - s - 1]) + w_hat
+        fitted.append(math.exp(y_hat))
+
+    # Recursive multi-step forecast out of sample
+    y_ext = list(y)
+    w_ext = dict(w_map)
+    last_eps = eps_hist.get(n - 1, 0.0)
+    forecasts = []
+    for h in range(1, horizon + 1):
+        t = n - 1 + h
+        ma_term = theta1 * last_eps if h == 1 else 0.0
+        w_fc = c + phi1 * w_ext.get(t - 1, 0.0) + Phi1 * w_ext.get(t - s, 0.0) + ma_term
+        w_ext[t] = w_fc
+        next_y = y_ext[t - 1] + (y_ext[t - s] - y_ext[t - s - 1]) + w_fc
+        y_ext.append(next_y)
+        forecasts.append(math.exp(next_y))
+
+    return fitted, forecasts
+
+
+def _prophet_features(t_vals, months, changepoints, total_len):
+    scale = max(total_len, 1)
+    rows = []
+    for t, m in zip(t_vals, months):
+        ts = t / scale
+        feat = [1.0, ts]
+        for cp in changepoints:
+            cps = cp / scale
+            feat.append(max(0.0, ts - cps))
+        for k in range(1, 4):
+            ang = 2.0 * math.pi * k * m / 12.0
+            feat.append(math.sin(ang))
+            feat.append(math.cos(ang))
+        rows.append(feat)
+    return rows
+
+
+def fit_predict_prophet_gam(t_vals, months, prices, future_t, future_months, total_len):
+    """
+    Pure-Python Prophet-style Generalized Additive Model in log space:
+    piecewise linear growth with regularized changepoints + 3-order yearly Fourier harmonics.
+    """
+    n = len(prices)
+    y_log = [math.log(max(p, 1.0)) for p in prices]
+    if n >= 18:
+        cp_fracs = [0.22, 0.38, 0.54, 0.70, 0.84]
+        changepoints = sorted({max(2, min(n - 3, int(round(f * (n - 1))))) for f in cp_fracs})
+    else:
+        changepoints = []
+
+    X_train = _prophet_features(t_vals, months, changepoints, total_len)
+    X_future = _prophet_features(future_t, future_months, changepoints, total_len)
+
+    # Regularize intercept=0, base slope=0.15, changepoints=1.8 (sparse prior), Fourier=0.25
+    penalties = [0.0, 0.15] + [1.8] * len(changepoints) + [0.25] * 6
+    weights = fit_ridge_weighted(X_train, y_log, penalties)
+
+    fitted = [math.exp(v) for v in predict_linear(X_train, weights)]
+    forecasts = [math.exp(v) for v in predict_linear(X_future, weights)]
+    return fitted, forecasts
+
+
+MODEL_REGISTRY = [
+    ("ridge_seasonal", "Ridge + Seasonal Dummies", "Basic"),
+    ("poly_seasonal", "Polynomial + Fourier Harmonics", "Basic"),
+    ("holt_winters", "Holt-Winters Multiplicative", "Basic"),
+    ("sarima", "Seasonal ARIMA (1,1,1)(1,1,0)[12]", "Advanced"),
+    ("prophet_gam", "Prophet GAM (Changepoints + Fourier)", "Advanced"),
+]
+
+
+def _run_raw_model(prices, months, t_vals, future_t, future_months, n, horizon, model_type):
+    if model_type == "holt_winters":
+        return fit_predict_holt_winters(prices, horizon)
+    if model_type == "sarima":
+        return fit_predict_sarima(prices, horizon)
+    if model_type == "prophet_gam":
+        return fit_predict_prophet_gam(t_vals, months, prices, future_t, future_months, n)
+
+    y_log = [math.log(max(p, 1.0)) for p in prices]
+    if model_type == "poly_seasonal":
+        X_train = features_poly_fourier(t_vals, months, n)
+        X_future = features_poly_fourier(future_t, future_months, n)
+        weights = fit_ridge_regression(X_train, y_log, alpha=0.35)
+    else:
+        X_train = features_ridge_seasonal(t_vals, months, n)
+        X_future = features_ridge_seasonal(future_t, future_months, n)
+        weights = fit_ridge_regression(X_train, y_log, alpha=0.25)
+
+    fitted = [math.exp(v) for v in predict_linear(X_train, weights)]
+    future_preds = [math.exp(v) for v in predict_linear(X_future, weights)]
+    return fitted, future_preds
+
+
 def run_forecast_model(series, horizon, model_type):
     n = len(series)
     prices = [r["price_ngn"] for r in series]
@@ -211,22 +417,9 @@ def run_forecast_model(series, horizon, model_type):
     future_months = [int(d.split("-")[1]) for d in future_dates]
     future_t = list(range(n, n + horizon))
 
-    if model_type == "holt_winters":
-        fitted, future_preds = fit_predict_holt_winters(prices, horizon)
-    else:
-        y_log = [math.log(max(p, 1.0)) for p in prices]
-        if model_type == "poly_seasonal":
-            X_train = features_poly_fourier(t_vals, months, n)
-            X_future = features_poly_fourier(future_t, future_months, n)
-            weights = fit_ridge_regression(X_train, y_log, alpha=0.35)
-        else:
-            # Default: ridge_seasonal
-            X_train = features_ridge_seasonal(t_vals, months, n)
-            X_future = features_ridge_seasonal(future_t, future_months, n)
-            weights = fit_ridge_regression(X_train, y_log, alpha=0.25)
-
-        fitted = [math.exp(v) for v in predict_linear(X_train, weights)]
-        future_preds = [math.exp(v) for v in predict_linear(X_future, weights)]
+    fitted, future_preds = _run_raw_model(
+        prices, months, t_vals, future_t, future_months, n, horizon, model_type
+    )
 
     # Compute residual standard error in log space for realistic multiplicative CI
     log_residuals = [
@@ -253,22 +446,16 @@ def run_forecast_model(series, horizon, model_type):
     if n > holdout + 12:
         train_slice = series[:-holdout]
         test_slice = series[-holdout:]
+        tr_n = len(train_slice)
         tr_prices = [r["price_ngn"] for r in train_slice]
         tr_months = [r["month"] for r in train_slice]
-        tr_t = list(range(len(train_slice)))
+        tr_t = list(range(tr_n))
         te_months = [r["month"] for r in test_slice]
-        te_t = list(range(len(train_slice), n))
+        te_t = list(range(tr_n, n))
 
-        if model_type == "holt_winters":
-            _, te_preds = fit_predict_holt_winters(tr_prices, holdout)
-        else:
-            tr_y = [math.log(max(p, 1.0)) for p in tr_prices]
-            if model_type == "poly_seasonal":
-                w_bt = fit_ridge_regression(features_poly_fourier(tr_t, tr_months, len(train_slice)), tr_y, alpha=0.35)
-                te_preds = [math.exp(v) for v in predict_linear(features_poly_fourier(te_t, te_months, len(train_slice)), w_bt)]
-            else:
-                w_bt = fit_ridge_regression(features_ridge_seasonal(tr_t, tr_months, len(train_slice)), tr_y, alpha=0.25)
-                te_preds = [math.exp(v) for v in predict_linear(features_ridge_seasonal(te_t, te_months, len(train_slice)), w_bt)]
+        _, te_preds = _run_raw_model(
+            tr_prices, tr_months, tr_t, te_t, te_months, tr_n, holdout, model_type
+        )
 
         actuals = [r["price_ngn"] for r in test_slice]
         abs_errs = [abs(a - p) for a, p in zip(actuals, te_preds)]
@@ -282,6 +469,35 @@ def run_forecast_model(series, horizon, model_type):
         }
 
     return fitted, forecast_points, backtest
+
+
+def compare_forecast_models(series, horizon):
+    latest_price = series[-1]["price_ngn"]
+    results = []
+    for m_type, label, family in MODEL_REGISTRY:
+        _, fc_pts, bt = run_forecast_model(series, horizon, m_type)
+        end_pred = fc_pts[-1]["predicted_ngn"] if fc_pts else latest_price
+        chg_pct = ((end_pred - latest_price) / max(latest_price, 1.0)) * 100.0
+        results.append({
+            "modelType": m_type,
+            "label": label,
+            "family": family,
+            "mae": bt["mae"],
+            "rmse": bt["rmse"],
+            "mape": bt["mape"],
+            "samples": bt["samples"],
+            "projectedEndNgn": round(end_pred, 0),
+            "projectedChangePct": round(chg_pct, 2),
+            "forecast": [
+                {"date": pt["date"], "predicted_ngn": pt["predicted_ngn"]}
+                for pt in fc_pts
+            ],
+        })
+
+    best_mape = min((r["mape"] for r in results), default=0.0)
+    for r in results:
+        r["isBest"] = r["mape"] == best_mape
+    return results
 
 
 def seasonal_decomposition(series):
@@ -463,6 +679,7 @@ def analyze(rows, payload):
 
     decomp = seasonal_decomposition(series)
     fitted, forecast_points, backtest = run_forecast_model(series, horizon, model_type)
+    model_comparison = compare_forecast_models(series, horizon)
 
     # Merge fitted values into historical records
     history = []
@@ -589,6 +806,7 @@ def analyze(rows, payload):
         "forecast": forecast_points,
         "backtest": backtest,
         "modelType": model_type,
+        "modelComparison": model_comparison,
         "marketComparison": market_comparison,
         "arbitrage": {
             "cheapest": cheapest_mkt,
@@ -768,7 +986,71 @@ def evaluate_alerts(rows, active_watchlist_id=None, db_path=None):
         if not rule["enabled"]:
             continue
 
-        # Scope candidate pairs
+        rule_type = rule.get("ruleType") or "deviation_pct"
+
+        if rule_type == "price_target":
+            target_price = rule.get("targetPriceNgn")
+            if target_price is None or target_price <= 0:
+                continue
+            for (cid, mid), series in series_map.items():
+                if rule["commodityId"] != "all" and cid != rule["commodityId"]:
+                    continue
+                if rule["marketId"] != "all" and mid != rule["marketId"]:
+                    continue
+                if not series:
+                    continue
+
+                b = _series_baselines(series)
+                latest_val = b["latest"]
+                triggered = False
+                if rule["direction"] == "above" and latest_val >= target_price:
+                    triggered = True
+                elif rule["direction"] == "below" and latest_val <= target_price:
+                    triggered = True
+
+                if not triggered:
+                    continue
+
+                dedup_key = (rule["id"], cid, mid)
+                if dedup_key in seen_alert_keys:
+                    continue
+                seen_alert_keys.add(dedup_key)
+
+                dev_pct = ((latest_val - target_price) / max(target_price, 1.0)) * 100.0
+                severity = "critical" if abs(dev_pct) >= 8.0 else "warning"
+                latest_row = series[-1]
+                cond_phrase = "at or above" if rule["direction"] == "above" else "at or below"
+                wl_name = all_monitored.get((cid, mid), "Price Target Watch")
+                alerts.append({
+                    "id": f"{rule['id']}_{cid}_{mid}",
+                    "ruleId": rule["id"],
+                    "ruleName": rule["name"],
+                    "ruleType": "price_target",
+                    "watchlistName": wl_name,
+                    "commodityId": cid,
+                    "commodityName": latest_row["commodity_name"],
+                    "unit": latest_row["unit"],
+                    "marketId": mid,
+                    "marketName": latest_row["market_name"],
+                    "state": latest_row["state"],
+                    "latestDate": latest_row["date"],
+                    "latestPriceNgn": round(latest_val, 0),
+                    "baselineType": "price_target",
+                    "baselineLabel": "Target Price",
+                    "baselineNgn": round(target_price, 0),
+                    "targetPriceNgn": round(target_price, 0),
+                    "deviationPct": round(dev_pct, 2),
+                    "thresholdPct": rule["thresholdPct"],
+                    "zScore": round(b["z_score"], 2),
+                    "severity": severity,
+                    "message": (
+                        f"{latest_row['commodity_name']} at {latest_row['market_name']} "
+                        f"reached ₦{round(latest_val):,} ({cond_phrase} target ₦{round(target_price):,})."
+                    ),
+                })
+            continue
+
+        # Scope candidate pairs for deviation_pct rules
         wl_scope = rule["watchlistId"]
         if wl_scope != "all" and wl_scope in monitored_by_wl:
             candidates = [
@@ -830,6 +1112,7 @@ def evaluate_alerts(rows, active_watchlist_id=None, db_path=None):
                 "id": f"{rule['id']}_{cid}_{mid}",
                 "ruleId": rule["id"],
                 "ruleName": rule["name"],
+                "ruleType": "deviation_pct",
                 "watchlistName": wl_name,
                 "commodityId": cid,
                 "commodityName": latest_row["commodity_name"],
@@ -842,6 +1125,7 @@ def evaluate_alerts(rows, active_watchlist_id=None, db_path=None):
                 "baselineType": base_key,
                 "baselineLabel": baseline_label,
                 "baselineNgn": round(baseline_val, 0),
+                "targetPriceNgn": None,
                 "deviationPct": round(dev_pct, 2),
                 "thresholdPct": rule["thresholdPct"],
                 "zScore": round(b["z_score"], 2),
@@ -876,6 +1160,23 @@ def main():
     raw_input = sys.stdin.read().strip()
     payload = json.loads(raw_input) if raw_input else {}
     custom_records = payload.get("customRecords")
+
+    if cmd == "observations_list":
+        print(json.dumps({"observations": watchlist_store.list_custom_observations()}))
+        return
+    if cmd == "observations_upsert":
+        obs = watchlist_store.upsert_custom_observations(payload.get("records") or [])
+        print(json.dumps({"observations": obs}))
+        return
+    if cmd == "observations_delete":
+        obs = watchlist_store.delete_custom_observation(payload.get("id", ""))
+        print(json.dumps({"observations": obs}))
+        return
+    if cmd == "observations_clear":
+        obs = watchlist_store.clear_custom_observations()
+        print(json.dumps({"observations": obs}))
+        return
+
     rows = load_dataset(custom_records)
 
     if cmd == "meta":
@@ -942,6 +1243,8 @@ def main():
             watchlist_id=payload.get("watchlistId", "all"),
             commodity_id=payload.get("commodityId", "all"),
             market_id=payload.get("marketId", "all"),
+            rule_type=payload.get("ruleType", "deviation_pct"),
+            target_price_ngn=payload.get("targetPriceNgn"),
         )
         res = evaluate_alerts(rows, active_watchlist_id=payload.get("activeWatchlistId"))
         result = {"created": created, **res}
@@ -950,6 +1253,7 @@ def main():
             payload.get("id", ""),
             enabled=payload.get("enabled"),
             threshold_pct=payload.get("thresholdPct"),
+            target_price_ngn=payload.get("targetPriceNgn"),
         )
         result = evaluate_alerts(rows, active_watchlist_id=payload.get("activeWatchlistId"))
     elif cmd == "alert_rule_delete":

@@ -33,8 +33,9 @@ class TestAnalyticsEngine(unittest.TestCase):
             self.assertLessEqual(fc["lower95_ngn"], fc["predicted_ngn"])
             self.assertGreaterEqual(fc["upper95_ngn"], fc["predicted_ngn"])
 
-    def test_analyze_supports_all_three_models(self):
-        for model in ["ridge_seasonal", "poly_seasonal", "holt_winters"]:
+    def test_analyze_supports_all_five_models_and_comparison(self):
+        all_models = ["ridge_seasonal", "poly_seasonal", "holt_winters", "sarima", "prophet_gam"]
+        for model in all_models:
             res = analyze(self.rows, {
                 "commodityId": "beans_oloyin",
                 "marketId": "dawanau_kano",
@@ -43,6 +44,99 @@ class TestAnalyticsEngine(unittest.TestCase):
             })
             self.assertEqual(len(res["forecast"]), 9)
             self.assertGreater(res["kpis"]["latestPriceNgn"], 0)
+            for fc in res["forecast"]:
+                self.assertLessEqual(fc["lower95_ngn"], fc["predicted_ngn"])
+                self.assertGreaterEqual(fc["upper95_ngn"], fc["predicted_ngn"])
+
+        comp = res["modelComparison"]
+        self.assertEqual(len(comp), 5)
+        families = {m["family"] for m in comp}
+        self.assertEqual(families, {"Basic", "Advanced"})
+        best_models = [m for m in comp if m["isBest"]]
+        self.assertGreaterEqual(len(best_models), 1)
+        min_mape = min(m["mape"] for m in comp)
+        self.assertEqual(best_models[0]["mape"], min_mape)
+        for m in comp:
+            self.assertEqual(len(m["forecast"]), 9)
+
+    def test_custom_observations_sqlite_persistence_and_immediate_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "obs_test.db")
+            saved = watchlist_store.upsert_custom_observations(
+                [
+                    {
+                        "date": "2026-11-01",
+                        "commodity_id": "tomatoes_basket",
+                        "commodity_name": "Tomatoes (Fresh Basket)",
+                        "category": "Perishables",
+                        "unit": "50kg basket",
+                        "market_id": "mile12_lagos",
+                        "market_name": "Mile 12 Market, Lagos",
+                        "state": "Lagos",
+                        "region": "South-West",
+                        "price_ngn": 145000,
+                    }
+                ],
+                db_path=db,
+            )
+            self.assertEqual(len(saved), 1)
+            obs_id = saved[0]["id"]
+
+            merged_rows = load_dataset(db_path=db)
+            res = analyze(merged_rows, {
+                "commodityId": "tomatoes_basket",
+                "marketId": "mile12_lagos",
+                "forecastMonths": 6,
+                "modelType": "sarima",
+            })
+            self.assertEqual(res["meta"]["latestDate"], "2026-11-01")
+            self.assertEqual(res["kpis"]["latestPriceNgn"], 145000)
+            self.assertTrue(res["history"][-1]["is_custom"])
+
+            after_del = watchlist_store.delete_custom_observation(obs_id, db_path=db)
+            self.assertEqual(len(after_del), 0)
+
+    def test_price_target_alert_rules(self):
+        from analytics_engine import evaluate_alerts
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "price_target_alerts.db")
+            # Pair not in starter watchlist (garri_white @ ariaria_aba)
+            series = sorted(
+                [r for r in self.rows if r["commodity_id"] == "garri_white" and r["market_id"] == "ariaria_aba"],
+                key=lambda r: r["date"],
+            )
+            latest_price = series[-1]["price_ngn"]
+
+            rule_above = watchlist_store.create_alert_rule(
+                name="Garri Ceiling Watch",
+                direction="above",
+                rule_type="price_target",
+                target_price_ngn=max(1000, latest_price - 5000),
+                commodity_id="garri_white",
+                market_id="ariaria_aba",
+                db_path=db,
+            )
+            rule_below = watchlist_store.create_alert_rule(
+                name="Garri Floor Watch",
+                direction="below",
+                rule_type="price_target",
+                target_price_ngn=latest_price + 5000,
+                commodity_id="garri_white",
+                market_id="ariaria_aba",
+                db_path=db,
+            )
+
+            res = evaluate_alerts(self.rows, db_path=db)
+            matched_ids = {a["ruleId"] for a in res["alerts"]}
+            self.assertIn(rule_above["id"], matched_ids)
+            self.assertIn(rule_below["id"], matched_ids)
+            target_alert = next(a for a in res["alerts"] if a["ruleId"] == rule_above["id"])
+            self.assertEqual(target_alert["ruleType"], "price_target")
+            self.assertEqual(target_alert["baselineType"], "price_target")
+
+            watchlist_store.update_alert_rule(rule_above["id"], enabled=False, db_path=db)
+            res_after = evaluate_alerts(self.rows, db_path=db)
+            self.assertNotIn(rule_above["id"], {a["ruleId"] for a in res_after["alerts"]})
 
     def test_watchlist_sqlite_crud_persistence(self):
         with tempfile.TemporaryDirectory() as tmp:

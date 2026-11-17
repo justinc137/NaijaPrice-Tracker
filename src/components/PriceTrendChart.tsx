@@ -1,6 +1,16 @@
 import React, { useMemo, useState } from "react";
-import type { ForecastPoint, HistoricalPoint } from "../types/market";
-import { formatCompactNaira, formatNaira, formatPeriodLabel } from "../utils/formatters";
+import type {
+  ForecastModelType,
+  ForecastPoint,
+  HistoricalPoint,
+  ModelComparisonEntry,
+} from "../types/market";
+import {
+  formatCompactNaira,
+  formatNaira,
+  formatPeriodLabel,
+  getShortModelLabel,
+} from "../utils/formatters";
 
 interface PriceTrendChartProps {
   history: HistoricalPoint[];
@@ -9,6 +19,9 @@ interface PriceTrendChartProps {
   unit: string;
   marketName: string;
   modelLabel: string;
+  activeModelType?: ForecastModelType;
+  comparisonModels?: ModelComparisonEntry[];
+  showModelOverlay?: boolean;
 }
 
 interface CombinedPoint {
@@ -21,7 +34,26 @@ interface CombinedPoint {
   lower95: number | null;
   upper95: number | null;
   seasonalFactor: number | null;
+  isCustom: boolean;
 }
+
+const OVERLAY_STYLES: Record<string, { strokeClass: string; dotClass: string; shortName: string }> = {
+  sarima: {
+    strokeClass: "stroke-indigo-600 dark:stroke-indigo-400",
+    dotClass: "bg-indigo-600 dark:bg-indigo-400",
+    shortName: "Seasonal ARIMA",
+  },
+  prophet_gam: {
+    strokeClass: "stroke-amber-600 dark:stroke-amber-400",
+    dotClass: "bg-amber-600 dark:bg-amber-400",
+    shortName: "Prophet GAM",
+  },
+  ridge_seasonal: {
+    strokeClass: "stroke-sky-600 dark:stroke-sky-400",
+    dotClass: "bg-sky-600 dark:bg-sky-400",
+    shortName: "Ridge Baseline",
+  },
+};
 
 export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
   history,
@@ -30,6 +62,9 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
   unit,
   marketName,
   modelLabel,
+  activeModelType,
+  comparisonModels = [],
+  showModelOverlay = false,
 }) => {
   const [showTrend, setShowTrend] = useState(true);
   const [showFitted, setShowFitted] = useState(false);
@@ -47,6 +82,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
       lower95: null,
       upper95: null,
       seasonalFactor: h.seasonal_factor,
+      isCustom: Boolean(h.is_custom),
     }));
 
     const fcPts: CombinedPoint[] = forecast.map((f) => ({
@@ -59,10 +95,23 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
       lower95: f.lower95_ngn,
       upper95: f.upper95_ngn,
       seasonalFactor: null,
+      isCustom: false,
     }));
 
     return [...histPts, ...fcPts];
   }, [history, forecast]);
+
+  const overlaySeries = useMemo(() => {
+    if (!showModelOverlay || comparisonModels.length === 0) return [];
+    const targetIds = ["sarima", "prophet_gam", "ridge_seasonal"];
+    return comparisonModels
+      .filter((m) => targetIds.includes(m.modelType) && m.modelType !== activeModelType)
+      .map((m) => ({
+        modelType: m.modelType,
+        style: OVERLAY_STYLES[m.modelType],
+        forecast: m.forecast,
+      }));
+  }, [showModelOverlay, comparisonModels, activeModelType]);
 
   const width = 920;
   const height = 340;
@@ -79,6 +128,11 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
       if (pt.lower95 !== null && showBand) vals.push(pt.lower95);
       if (pt.upper95 !== null && showBand) vals.push(pt.upper95);
     }
+    for (const ov of overlaySeries) {
+      for (const f of ov.forecast) {
+        vals.push(f.predicted_ngn);
+      }
+    }
     const rawMin = vals.length ? Math.min(...vals) : 0;
     const rawMax = vals.length ? Math.max(...vals) : 1000;
     const span = Math.max(rawMax - rawMin, 1000);
@@ -86,7 +140,7 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
     const hi = Math.ceil((rawMax + span * 0.08) / 1000) * 1000;
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => lo + (hi - lo) * t);
     return { minY: lo, maxY: hi, yTicks: ticks };
-  }, [combined, showTrend, showBand]);
+  }, [combined, showTrend, showBand, overlaySeries]);
 
   const xFor = (i: number) => {
     if (combined.length <= 1) return pad.left;
@@ -147,8 +201,14 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
     for (let i = 0; i < combined.length; i += step) {
       indices.push(i);
     }
-    if (indices[indices.length - 1] !== combined.length - 1) {
-      indices.push(combined.length - 1);
+    const lastIdx = combined.length - 1;
+    if (indices.length > 0 && indices[indices.length - 1] !== lastIdx) {
+      const gap = lastIdx - indices[indices.length - 1];
+      if (gap < Math.max(4, Math.floor(step * 0.65))) {
+        indices[indices.length - 1] = lastIdx;
+      } else {
+        indices.push(lastIdx);
+      }
     }
     return indices;
   }, [combined.length]);
@@ -217,7 +277,11 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             </span>
             <span className="text-slate-400 dark:text-slate-500" aria-hidden="true">·</span>
             <span className="font-medium text-slate-600 dark:text-slate-300">
-              {activePoint.kind === "history" ? "Observed Market Price" : "Projected Forecast"}
+              {activePoint.kind === "history"
+                ? activePoint.isCustom
+                  ? "Live Survey Entry (Custom)"
+                  : "Observed Market Price"
+                : "Projected Forecast"}
             </span>
           </div>
 
@@ -361,6 +425,42 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
             />
           )}
 
+          {/* Custom live survey point markers */}
+          {history.map((h, idx) =>
+            h.is_custom ? (
+              <circle
+                key={`custom-${h.date}-${idx}`}
+                cx={xFor(idx)}
+                cy={yFor(h.price_ngn)}
+                r="4.5"
+                className="fill-emerald-600 dark:fill-emerald-400 stroke-white dark:stroke-slate-900"
+                strokeWidth="2"
+              />
+            ) : null
+          )}
+
+          {/* Comparison model overlay trajectories */}
+          {overlaySeries.map((ov) => {
+            if (history.length === 0 || ov.forecast.length === 0) return null;
+            const pts = [
+              `${xFor(lastHistIdx).toFixed(1)},${yFor(history[lastHistIdx].price_ngn).toFixed(1)}`,
+              ...ov.forecast.map(
+                (f, j) => `${xFor(history.length + j).toFixed(1)},${yFor(f.predicted_ngn).toFixed(1)}`
+              ),
+            ];
+            return (
+              <path
+                key={ov.modelType}
+                d={`M ${pts.join(" L ")}`}
+                fill="none"
+                className={ov.style?.strokeClass ?? "stroke-indigo-600"}
+                strokeWidth="1.75"
+                strokeDasharray="3 3"
+                strokeOpacity={0.85}
+              />
+            );
+          })}
+
           {/* Forecast trajectory */}
           {forecastPath && (
             <path
@@ -463,8 +563,20 @@ export const PriceTrendChart: React.FC<PriceTrendChartProps> = ({
         )}
         <span className="inline-flex items-center gap-2">
           <span className="w-4 h-0 border-t-2 border-dashed border-emerald-700 dark:border-emerald-400 inline-block" />
-          Python Forecast
+          Python Forecast ({activeModelType ? getShortModelLabel(activeModelType) : modelLabel})
         </span>
+        {overlaySeries.map((ov) => (
+          <span key={`legend-${ov.modelType}`} className="inline-flex items-center gap-2">
+            <span className={`w-3.5 h-0.5 ${ov.style?.dotClass ?? "bg-indigo-600"} inline-block`} />
+            {ov.style?.shortName ?? ov.modelType}
+          </span>
+        ))}
+        {history.some((h) => h.is_custom) && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 inline-block" />
+            Live Survey Entry
+          </span>
+        )}
         {showBand && (
           <span className="inline-flex items-center gap-2">
             <span className="w-3.5 h-3 bg-emerald-600/20 border border-emerald-600/30 dark:bg-emerald-400/20 dark:border-emerald-400/30 rounded-xs inline-block" />

@@ -72,20 +72,57 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
 
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS custom_observations (
+                id TEXT PRIMARY KEY,
+                obs_date TEXT NOT NULL,
+                commodity_id TEXT NOT NULL,
+                commodity_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                unit TEXT NOT NULL,
+                market_id TEXT NOT NULL,
+                market_name TEXT NOT NULL,
+                state TEXT NOT NULL,
+                region TEXT NOT NULL,
+                price_ngn REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(obs_date, commodity_id, market_id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS alert_rules (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 watchlist_id TEXT NOT NULL DEFAULT 'all',
                 commodity_id TEXT NOT NULL DEFAULT 'all',
                 market_id TEXT NOT NULL DEFAULT 'all',
-                baseline_type TEXT NOT NULL,
+                rule_type TEXT NOT NULL DEFAULT 'deviation_pct',
+                baseline_type TEXT NOT NULL DEFAULT 'avg_12m',
                 direction TEXT NOT NULL,
-                threshold_pct REAL NOT NULL,
+                threshold_pct REAL NOT NULL DEFAULT 12.0,
+                target_price_ngn REAL DEFAULT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             )
             """
         )
+
+        # Migrate pre-existing alert_rules schema if columns are missing
+        existing_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(alert_rules)").fetchall()
+        }
+        if "rule_type" not in existing_cols:
+            conn.execute(
+                "ALTER TABLE alert_rules ADD COLUMN rule_type TEXT NOT NULL DEFAULT 'deviation_pct'"
+            )
+        if "target_price_ngn" not in existing_cols:
+            conn.execute(
+                "ALTER TABLE alert_rules ADD COLUMN target_price_ngn REAL DEFAULT NULL"
+            )
+
         alerts_seeded = conn.execute(
             "SELECT value FROM watchlist_meta WHERE key = 'alerts_seeded'"
         ).fetchone()
@@ -98,9 +135,11 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
                     "all",
                     "all",
                     "all",
+                    "deviation_pct",
                     "avg_12m",
                     "above",
                     12.0,
+                    None,
                     1,
                     now,
                 ),
@@ -110,9 +149,11 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
                     "all",
                     "all",
                     "all",
+                    "deviation_pct",
                     "trend",
                     "both",
                     10.0,
+                    None,
                     1,
                     now,
                 ),
@@ -120,8 +161,8 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
             conn.executemany(
                 """
                 INSERT OR IGNORE INTO alert_rules
-                (id, name, watchlist_id, commodity_id, market_id, baseline_type, direction, threshold_pct, enabled, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, watchlist_id, commodity_id, market_id, rule_type, baseline_type, direction, threshold_pct, target_price_ngn, enabled, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 starter_rules,
             )
@@ -129,6 +170,100 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
                 "INSERT OR REPLACE INTO watchlist_meta (key, value) VALUES ('alerts_seeded', '1')"
             )
         conn.commit()
+
+
+def list_custom_observations(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, obs_date, commodity_id, commodity_name, category, unit,
+                   market_id, market_name, state, region, price_ngn, created_at
+            FROM custom_observations
+            ORDER BY obs_date DESC, created_at DESC
+            """
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "date": r["obs_date"],
+                "commodity_id": r["commodity_id"],
+                "commodity_name": r["commodity_name"],
+                "category": r["category"],
+                "unit": r["unit"],
+                "market_id": r["market_id"],
+                "market_name": r["market_name"],
+                "state": r["state"],
+                "region": r["region"],
+                "price_ngn": float(r["price_ngn"]),
+                "createdAt": r["created_at"],
+            }
+            for r in rows
+        ]
+
+
+def upsert_custom_observations(records: list[dict], db_path: str = DEFAULT_DB_PATH) -> list[dict]:
+    init_db(db_path)
+    if not records:
+        return list_custom_observations(db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect(db_path) as conn:
+        for rec in records:
+            obs_date = str(rec.get("date", ""))[:10]
+            cid = str(rec.get("commodity_id", "")).strip()
+            mid = str(rec.get("market_id", "")).strip()
+            price = float(rec.get("price_ngn", 0))
+            if len(obs_date) != 10 or not cid or not mid or price <= 0:
+                raise ValueError("Invalid observation: date (YYYY-MM-DD), commodity_id, market_id, and positive price_ngn are required.")
+            obs_id = f"obs_{uuid.uuid4().hex[:10]}"
+            conn.execute(
+                """
+                INSERT INTO custom_observations
+                (id, obs_date, commodity_id, commodity_name, category, unit, market_id, market_name, state, region, price_ngn, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(obs_date, commodity_id, market_id) DO UPDATE SET
+                    commodity_name = excluded.commodity_name,
+                    category = excluded.category,
+                    unit = excluded.unit,
+                    market_name = excluded.market_name,
+                    state = excluded.state,
+                    region = excluded.region,
+                    price_ngn = excluded.price_ngn,
+                    created_at = excluded.created_at
+                """,
+                (
+                    obs_id,
+                    obs_date,
+                    cid,
+                    str(rec.get("commodity_name", cid)),
+                    str(rec.get("category", "Custom")),
+                    str(rec.get("unit", "bag")),
+                    mid,
+                    str(rec.get("market_name", mid)),
+                    str(rec.get("state", "Nigeria")),
+                    str(rec.get("region", "Custom")),
+                    round(price),
+                    now,
+                ),
+            )
+        conn.commit()
+    return list_custom_observations(db_path)
+
+
+def delete_custom_observation(obs_id: str, db_path: str = DEFAULT_DB_PATH) -> list[dict]:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM custom_observations WHERE id = ?", (obs_id,))
+        conn.commit()
+    return list_custom_observations(db_path)
+
+
+def clear_custom_observations(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM custom_observations")
+        conn.commit()
+    return []
 
 
 def list_watchlists(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
@@ -241,7 +376,8 @@ def list_alert_rules(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
         rows = conn.execute(
             """
             SELECT id, name, watchlist_id, commodity_id, market_id,
-                   baseline_type, direction, threshold_pct, enabled, created_at
+                   rule_type, baseline_type, direction, threshold_pct, target_price_ngn,
+                   enabled, created_at
             FROM alert_rules
             ORDER BY created_at ASC
             """
@@ -253,9 +389,11 @@ def list_alert_rules(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
                 "watchlistId": r["watchlist_id"],
                 "commodityId": r["commodity_id"],
                 "marketId": r["market_id"],
+                "ruleType": r["rule_type"] or "deviation_pct",
                 "baselineType": r["baseline_type"],
                 "direction": r["direction"],
                 "thresholdPct": float(r["threshold_pct"]),
+                "targetPriceNgn": float(r["target_price_ngn"]) if r["target_price_ngn"] is not None else None,
                 "enabled": bool(r["enabled"]),
                 "createdAt": r["created_at"],
             }
@@ -271,19 +409,35 @@ def create_alert_rule(
     watchlist_id: str = "all",
     commodity_id: str = "all",
     market_id: str = "all",
+    rule_type: str = "deviation_pct",
+    target_price_ngn: float | None = None,
     db_path: str = DEFAULT_DB_PATH,
 ) -> dict:
     init_db(db_path)
     clean_name = str(name).strip()
     if not clean_name:
         raise ValueError("Alert rule name is required.")
-    if baseline_type not in ("avg_12m", "avg_all", "trend"):
-        raise ValueError("baselineType must be avg_12m, avg_all, or trend.")
-    if direction not in ("above", "below", "both"):
-        raise ValueError("direction must be above, below, or both.")
-    pct = float(threshold_pct)
-    if pct <= 0 or pct > 200:
-        raise ValueError("thresholdPct must be between 0.1 and 200.")
+    if rule_type not in ("deviation_pct", "price_target"):
+        raise ValueError("ruleType must be deviation_pct or price_target.")
+
+    if rule_type == "price_target":
+        if direction not in ("above", "below"):
+            raise ValueError("Price target alerts require direction 'above' or 'below'.")
+        if target_price_ngn is None or float(target_price_ngn) <= 0:
+            raise ValueError("Target price in Naira must be greater than 0.")
+        target_val = round(float(target_price_ngn), 0)
+        pct = float(threshold_pct) if threshold_pct else 0.0
+        base = "price_target"
+    else:
+        if baseline_type not in ("avg_12m", "avg_all", "trend"):
+            raise ValueError("baselineType must be avg_12m, avg_all, or trend.")
+        if direction not in ("above", "below", "both"):
+            raise ValueError("direction must be above, below, or both.")
+        pct = float(threshold_pct)
+        if pct <= 0 or pct > 200:
+            raise ValueError("thresholdPct must be between 0.1 and 200.")
+        target_val = None
+        base = baseline_type
 
     rule_id = f"ar_{uuid.uuid4().hex[:10]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -291,8 +445,8 @@ def create_alert_rule(
         conn.execute(
             """
             INSERT INTO alert_rules
-            (id, name, watchlist_id, commodity_id, market_id, baseline_type, direction, threshold_pct, enabled, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            (id, name, watchlist_id, commodity_id, market_id, rule_type, baseline_type, direction, threshold_pct, target_price_ngn, enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             """,
             (
                 rule_id,
@@ -300,9 +454,11 @@ def create_alert_rule(
                 watchlist_id or "all",
                 commodity_id or "all",
                 market_id or "all",
-                baseline_type,
+                rule_type,
+                base,
                 direction,
                 pct,
+                target_val,
                 now,
             ),
         )
@@ -313,9 +469,11 @@ def create_alert_rule(
         "watchlistId": watchlist_id or "all",
         "commodityId": commodity_id or "all",
         "marketId": market_id or "all",
-        "baselineType": baseline_type,
+        "ruleType": rule_type,
+        "baselineType": base,
         "direction": direction,
         "thresholdPct": pct,
+        "targetPriceNgn": target_val,
         "enabled": True,
         "createdAt": now,
     }
@@ -325,6 +483,7 @@ def update_alert_rule(
     rule_id: str,
     enabled: bool | None = None,
     threshold_pct: float | None = None,
+    target_price_ngn: float | None = None,
     db_path: str = DEFAULT_DB_PATH,
 ):
     init_db(db_path)
@@ -344,6 +503,14 @@ def update_alert_rule(
             conn.execute(
                 "UPDATE alert_rules SET threshold_pct = ? WHERE id = ?",
                 (pct, rule_id),
+            )
+        if target_price_ngn is not None:
+            tp = float(target_price_ngn)
+            if tp <= 0:
+                raise ValueError("targetPriceNgn must be positive.")
+            conn.execute(
+                "UPDATE alert_rules SET target_price_ngn = ? WHERE id = ?",
+                (round(tp, 0), rule_id),
             )
         conn.commit()
 
