@@ -7,6 +7,7 @@ export type ForecastModelType =
 
 export type WorkspaceTab =
   | "overview"
+  | "live"
   | "watchlists"
   | "seasonality"
   | "arbitrage"
@@ -283,5 +284,79 @@ export interface AlertsResponse {
     warningCount: number;
   };
 }
+
+export interface LiveFxRates {
+  usdNgn: number;
+  gbpNgn: number | null;
+  eurNgn: number | null;
+  updatedAtUtc: string;
+  provider: string;
+}
+
+export interface WorldBankCpiInfo {
+  year: string;
+  cpiPct: number;
+  indicator: string;
+  provider: string;
+}
+
+export interface LiveSourceMeta {
+  datasetTitle: string;
+  organization: string;
+  lastModified: string;
+  datasetDate?: string;
+  csvUrl: string;
+}
+
+export interface LiveCommoditySummary {
+  commodity: string;
+  category: string;
+  mappedCommodityId: string | null;
+  mappedCommodityName: string | null;
+  wholesaleUnit: string | null;
+  latestDate: string;
+  unit: string;
+  avgRetailNgn: number;
+  minRetailNgn: number;
+  maxRetailNgn: number;
+  avgUsdPrice: number;
+  normalizedWholesaleNgn: number | null;
+  unitScaleFactor: number | null;
+  quoteCount: number;
+  states: string[];
+}
+
+export interface LiveMarketQuote {
+  date: string;
+  state: string;
+  lga: string;
+  market: string;
+  category: string;
+  commodity: string;
+  mappedCommodityId: string | null;
+  mappedCommodityName: string | null;
+  wholesaleUnit: string | null;
+  unit: string;
+  priceType: string;
+  priceNgn: number;
+  usdPrice: number;
+  normalizedWholesaleNgn: number | null;
+  unitScaleFactor: number | null;
+}
+
+export interface LiveFeedSnapshot {
+  fetchedAt: string;
+  latestSurveyDate: string | null;
+  totalRecentQuotes: number;
+  statesCovered: string[];
+  marketsCoveredCount: number;
+  fx: LiveFxRates | null;
+  cpi: WorldBankCpiInfo | null;
+  sourceMeta: LiveSourceMeta;
+  commoditySummaries: LiveCommoditySummary[];
+  quotes: LiveMarketQuote[];
+  warnings?: string[];
+}
+
 
 

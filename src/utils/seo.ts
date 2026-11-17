@@ -20,6 +20,15 @@ export const ROUTE_SEO_LIST: RouteSeoMeta[] = [
     h1: "Nigerian Commodity Price Trajectory & Forecast",
   },
   {
+    tab: "live",
+    slug: "/live-feeds",
+    navLabel: "Live Feeds",
+    title: "Live Nigerian Market Feeds & FX Parity – NaijaPrice Tracker",
+    description:
+      "Fetch real-time WFP Nigeria food price surveys, USD/NGN spot FX parity, and World Bank CPI inflation data directly into your forecast models.",
+    h1: "Real-Time External Nigerian Market & Macro Feeds",
+  },
+  {
     tab: "watchlists",
     slug: "/watchlists",
     navLabel: "Watchlists",

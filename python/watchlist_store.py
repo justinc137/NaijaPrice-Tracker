@@ -2,6 +2,7 @@
 SQLite-backed personalized watchlist storage and performance evaluation for NaijaPrice Tracker.
 """
 
+import json
 import os
 import sqlite3
 import uuid
@@ -169,6 +170,16 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
             conn.execute(
                 "INSERT OR REPLACE INTO watchlist_meta (key, value) VALUES ('alerts_seeded', '1')"
             )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS live_feed_snapshots (
+                id TEXT PRIMARY KEY,
+                fetched_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            )
+            """
+        )
         conn.commit()
 
 
@@ -520,4 +531,38 @@ def delete_alert_rule(rule_id: str, db_path: str = DEFAULT_DB_PATH):
     with _connect(db_path) as conn:
         conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
         conn.commit()
+
+
+def get_latest_live_feed_snapshot(db_path: str = DEFAULT_DB_PATH) -> dict | None:
+    init_db(db_path)
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT fetched_at, payload_json FROM live_feed_snapshots WHERE id = 'latest'"
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            payload = json.loads(row["payload_json"])
+            return payload
+        except json.JSONDecodeError:
+            return None
+
+
+def save_live_feed_snapshot(payload: dict, db_path: str = DEFAULT_DB_PATH) -> dict:
+    init_db(db_path)
+    fetched_at = str(payload.get("fetchedAt") or datetime.now(timezone.utc).isoformat())
+    serialized = json.dumps(payload)
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO live_feed_snapshots (id, fetched_at, payload_json)
+            VALUES ('latest', ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                fetched_at = excluded.fetched_at,
+                payload_json = excluded.payload_json
+            """,
+            (fetched_at, serialized),
+        )
+        conn.commit()
+    return payload
 

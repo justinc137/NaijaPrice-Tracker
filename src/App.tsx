@@ -7,15 +7,18 @@ import {
   BookmarkCheck,
   CalendarRange,
   FileSpreadsheet,
+  Globe,
   Menu,
   Moon,
   Plus,
+  RefreshCw,
   Sun,
   Table2,
   X,
 } from "lucide-react";
 import { AlertBanner, getAlertDismissKey } from "./components/AlertBanner";
 import { DataLedgerView } from "./components/DataLedgerView";
+import { LiveMarketFeedView } from "./components/LiveMarketFeedView";
 import { LivePriceInputPanel } from "./components/LivePriceInputPanel";
 import { MarketArbitrageView } from "./components/MarketArbitrageView";
 import { ModelComparisonPanel } from "./components/ModelComparisonPanel";
@@ -34,6 +37,7 @@ import type {
   CustomPriceRecord,
   DatasetMetaResponse,
   ForecastModelType,
+  LiveFeedSnapshot,
   PriceAlert,
   WatchlistGroup,
   WatchlistItem,
@@ -63,9 +67,11 @@ const DISMISSED_ALERTS_KEY = "naijaprice_dismissed_alerts_v1";
 const THEME_STORAGE_KEY = "naijaprice_theme";
 const OFFLINE_META_KEY = "naijaprice_offline_meta_v1";
 const OFFLINE_ANALYSIS_KEY = "naijaprice_offline_analysis_v1";
+const OFFLINE_LIVE_FEED_KEY = "naijaprice_offline_live_feed_v1";
 
 const NAV_ITEMS: { id: WorkspaceTab; label: string; slug: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "overview", label: "Price & Forecast", slug: "/price-forecast", icon: BarChart3 },
+  { id: "live", label: "Live Feeds", slug: "/live-feeds", icon: Globe },
   { id: "watchlists", label: "Watchlists", slug: "/watchlists", icon: BookmarkCheck },
   { id: "seasonality", label: "Seasonality Matrix", slug: "/seasonality-matrix", icon: CalendarRange },
   { id: "arbitrage", label: "Market Arbitrage", slug: "/market-arbitrage", icon: ArrowLeftRight },
@@ -133,6 +139,15 @@ export default function App() {
   const [showLiveInput, setShowLiveInput] = useState(false);
   const [showQuickAlert, setShowQuickAlert] = useState(false);
   const [showModelOverlay, setShowModelOverlay] = useState(false);
+  const [liveSnapshot, setLiveSnapshot] = useState<LiveFeedSnapshot | null>(() => {
+    const snap = loadOfflineSnapshot<LiveFeedSnapshot>(OFFLINE_LIVE_FEED_KEY);
+    return snap?.value ?? null;
+  });
+  const [liveFetching, setLiveFetching] = useState(false);
+  const [liveSyncing, setLiveSyncing] = useState(false);
+  const [liveFetchError, setLiveFetchError] = useState<string | null>(null);
+  const [liveSyncFeedback, setLiveSyncFeedback] = useState<string | null>(null);
+  const [autoRefreshMinutes, setAutoRefreshMinutes] = useState<number>(0);
   const [notificationPermission, setNotificationPermission] = useState<
     NotificationPermission | "unsupported"
   >(() =>
@@ -272,6 +287,25 @@ export default function App() {
       })
       .catch(() => {
         // Keep local fallback when offline
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load cached SQLite live market snapshot on startup
+  useEffect(() => {
+    let active = true;
+    fetch("/api/live-feed")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { snapshot?: LiveFeedSnapshot | null } | null) => {
+        if (!active || !data || !data.snapshot) return;
+        setLiveSnapshot(data.snapshot);
+        saveOfflineSnapshot(OFFLINE_LIVE_FEED_KEY, data.snapshot);
+        void mirrorJsonToSwCache("/api/live-feed", "", data);
+      })
+      .catch(() => {
+        // Keep cached offline snapshot
       });
     return () => {
       active = false;
@@ -610,6 +644,83 @@ export default function App() {
     }
   };
 
+  const handleFetchLiveFeed = useCallback(async () => {
+    setLiveFetching(true);
+    setLiveFetchError(null);
+    setLiveSyncFeedback(null);
+    try {
+      const res = await fetch("/api/live-feed/fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monthsBack: 3 }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error || !data.snapshot) {
+        throw new Error(data.error || "Unable to fetch external live market feeds.");
+      }
+      const nextSnap = data.snapshot as LiveFeedSnapshot;
+      setLiveSnapshot(nextSnap);
+      saveOfflineSnapshot(OFFLINE_LIVE_FEED_KEY, nextSnap);
+      void mirrorJsonToSwCache("/api/live-feed", "", { snapshot: nextSnap });
+    } catch (err) {
+      setLiveFetchError((err as Error).message);
+    } finally {
+      setLiveFetching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (autoRefreshMinutes <= 0) return;
+    const timer = window.setInterval(() => {
+      void handleFetchLiveFeed();
+    }, autoRefreshMinutes * 60_000);
+    return () => window.clearInterval(timer);
+  }, [autoRefreshMinutes, handleFetchLiveFeed]);
+
+  const handleSyncLiveFeedToModel = async (
+    targetMarketId: string,
+    commodityIds?: string[]
+  ) => {
+    setLiveSyncing(true);
+    setLiveFetchError(null);
+    setLiveSyncFeedback(null);
+    try {
+      const res = await fetch("/api/live-feed/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetMarketId, commodityIds }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to sync live market quotes into forecast model.");
+      }
+      const updatedObs = (data.observations ?? []) as CustomPriceRecord[];
+      setCustomRecords(updatedObs);
+      setMarketId(targetMarketId);
+      const count = Number(data.syncedCount ?? 0);
+      const targetName =
+        meta?.markets.find((m) => m.id === targetMarketId)?.name ?? targetMarketId;
+      setLiveSyncFeedback(
+        `Synced ${count} live wholesale-normalized observation${count === 1 ? "" : "s"} into ${targetName}.`
+      );
+      const evalPayload = { activeWatchlistId, customRecords: updatedObs };
+      const evalRes = await fetch("/api/alerts/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(evalPayload),
+      });
+      if (evalRes.ok) {
+        const evalData = (await evalRes.json()) as AlertsResponse;
+        setAlertRules(evalData.rules);
+        applyAlertUpdate(evalData.alerts, true);
+      }
+    } catch (err) {
+      setLiveFetchError((err as Error).message);
+    } finally {
+      setLiveSyncing(false);
+    }
+  };
+
   const activeCommodity = meta?.commodities.find((c) => c.id === commodityId);
   const activeMarket = meta?.markets.find((m) => m.id === marketId);
   const activeWatchlist =
@@ -896,6 +1007,21 @@ export default function App() {
               <div className="no-print flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => void handleFetchLiveFeed()}
+                  disabled={liveFetching}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-60 whitespace-nowrap shrink-0"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 ${
+                      liveFetching ? "animate-spin" : ""
+                    }`}
+                    aria-hidden="true"
+                  />
+                  <span>{liveFetching ? "Fetching..." : "Fetch Live Feed"}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     setShowLiveInput((v) => !v);
                     setShowQuickAlert(false);
@@ -1098,6 +1224,80 @@ export default function App() {
                         </div>
                       </div>
                     </section>
+
+                    {liveFetchError && (
+                      <div
+                        role="alert"
+                        className="bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 rounded-xl px-4 py-3 text-xs text-red-800 dark:text-red-200"
+                      >
+                        {liveFetchError}
+                      </div>
+                    )}
+
+                    {liveSyncFeedback && (
+                      <div
+                        role="status"
+                        className="bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3 text-xs text-emerald-900 dark:text-emerald-200"
+                      >
+                        {liveSyncFeedback}
+                      </div>
+                    )}
+
+                    {liveSnapshot && (
+                      <section
+                        aria-label="Live external macro and WFP market benchmark"
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                          <span className="font-semibold text-slate-900 dark:text-slate-100">
+                            Live External Macro
+                          </span>
+                          {liveSnapshot.fx && (
+                            <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300">
+                              USD/NGN ₦{liveSnapshot.fx.usdNgn.toLocaleString("en-NG", { maximumFractionDigits: 2 })}
+                            </span>
+                          )}
+                          {liveSnapshot.cpi && (
+                            <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300">
+                              CPI ({liveSnapshot.cpi.year}): {liveSnapshot.cpi.cpiPct.toFixed(1)}%
+                            </span>
+                          )}
+                          {(() => {
+                            const match = liveSnapshot.commoditySummaries.find(
+                              (s) => s.mappedCommodityId === commodityId && s.normalizedWholesaleNgn !== null
+                            );
+                            if (!match) return null;
+                            return (
+                              <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-400 font-medium">
+                                WFP {match.commodity}: {formatNaira(match.avgRetailNgn)}/{match.unit} (Equiv. {formatNaira(match.normalizedWholesaleNgn)})
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          {liveSnapshot.commoditySummaries.some(
+                            (s) => s.mappedCommodityId === commodityId && s.normalizedWholesaleNgn !== null
+                          ) && (
+                            <button
+                              type="button"
+                              disabled={liveSyncing}
+                              onClick={() => void handleSyncLiveFeedToModel(marketId, [commodityId])}
+                              className="font-semibold text-emerald-700 dark:text-emerald-400 hover:underline whitespace-nowrap disabled:opacity-60"
+                            >
+                              {liveSyncing ? "Syncing..." : "Sync Live Quote to Chart"}
+                            </button>
+                          )}
+                          <a
+                            href="/live-feeds"
+                            onClick={(e) => handleSpaLinkClick(e, "live")}
+                            className="font-medium text-slate-600 dark:text-slate-300 hover:underline whitespace-nowrap"
+                          >
+                            All Live Feeds →
+                          </a>
+                        </div>
+                      </section>
+                    )}
 
                     {/* Primary Focal Anchor: Interactive Price Trend + Forecast Chart */}
                     <PriceTrendChart
@@ -1347,6 +1547,27 @@ export default function App() {
                       )}
                     </section>
                   </div>
+                )}
+
+                {activeTab === "live" && meta && (
+                  <LiveMarketFeedView
+                    snapshot={liveSnapshot}
+                    markets={meta.markets}
+                    activeMarketId={marketId}
+                    fetching={liveFetching}
+                    syncing={liveSyncing}
+                    fetchError={liveFetchError}
+                    syncFeedback={liveSyncFeedback}
+                    autoRefreshMinutes={autoRefreshMinutes}
+                    onChangeAutoRefreshMinutes={setAutoRefreshMinutes}
+                    onFetchLiveFeed={handleFetchLiveFeed}
+                    onSyncToForecast={handleSyncLiveFeedToModel}
+                    onInspectSeries={(cid, mid) => {
+                      setCommodityId(cid);
+                      setMarketId(mid);
+                      navigateToTab("overview");
+                    }}
+                  />
                 )}
 
                 {activeTab === "watchlists" && meta && (

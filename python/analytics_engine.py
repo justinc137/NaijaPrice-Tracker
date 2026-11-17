@@ -20,6 +20,7 @@ import sys
 from collections import defaultdict
 from datetime import date
 
+import live_fetcher
 import pdf_report
 import watchlist_store
 
@@ -1175,6 +1176,28 @@ def main():
     if cmd == "observations_clear":
         obs = watchlist_store.clear_custom_observations()
         print(json.dumps({"observations": obs}))
+        return
+    if cmd == "live_feed_get":
+        snap = watchlist_store.get_latest_live_feed_snapshot()
+        print(json.dumps({"snapshot": snap}))
+        return
+    if cmd == "live_feed_fetch":
+        months_back = int(payload.get("monthsBack", 3) or 3)
+        snap = live_fetcher.fetch_all_live_feeds(months_back=max(1, min(6, months_back)))
+        watchlist_store.save_live_feed_snapshot(snap)
+        print(json.dumps({"snapshot": snap}))
+        return
+    if cmd == "live_feed_sync_to_model":
+        snap = payload.get("snapshot") or watchlist_store.get_latest_live_feed_snapshot()
+        target_market_id = str(payload.get("targetMarketId") or "mile12_lagos")
+        commodity_ids = payload.get("commodityIds")
+        records = live_fetcher.build_sync_observations(
+            snap,
+            target_market_id=target_market_id,
+            commodity_ids=commodity_ids,
+        )
+        obs = watchlist_store.upsert_custom_observations(records)
+        print(json.dumps({"observations": obs, "syncedCount": len(records), "syncedRecords": records}))
         return
 
     rows = load_dataset(custom_records)

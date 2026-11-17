@@ -16,7 +16,7 @@ const PRECACHE_URLS = [
   "/apple-touch-icon.png",
 ];
 
-const CACHEABLE_GET_API = new Set(["/api/meta", "/api/health"]);
+const CACHEABLE_GET_API = new Set(["/api/meta", "/api/health", "/api/live-feed"]);
 const CACHEABLE_POST_API = new Set([
   "/api/analyze",
   "/api/watchlists/list",

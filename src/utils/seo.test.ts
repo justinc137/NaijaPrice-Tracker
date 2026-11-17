@@ -10,6 +10,7 @@ import {
 test("tabFromPathname maps clean slugs and root cleanly", () => {
   assert.equal(tabFromPathname("/"), "overview");
   assert.equal(tabFromPathname("/price-forecast"), "overview");
+  assert.equal(tabFromPathname("/live-feeds"), "live");
   assert.equal(tabFromPathname("/watchlists/"), "watchlists");
   assert.equal(tabFromPathname("/seasonality-matrix"), "seasonality");
   assert.equal(tabFromPathname("/market-arbitrage"), "arbitrage");
@@ -20,6 +21,7 @@ test("tabFromPathname maps clean slugs and root cleanly", () => {
 
 test("getSlugForTab returns lowercase hyphenated clean slugs", () => {
   assert.equal(getSlugForTab("overview"), "/price-forecast");
+  assert.equal(getSlugForTab("live"), "/live-feeds");
   assert.equal(getSlugForTab("watchlists"), "/watchlists");
   assert.equal(getSlugForTab("seasonality"), "/seasonality-matrix");
   assert.equal(getSlugForTab("arbitrage"), "/market-arbitrage");

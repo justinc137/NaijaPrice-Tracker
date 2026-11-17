@@ -264,6 +264,59 @@ class TestAnalyticsEngine(unittest.TestCase):
             w, h = struct.unpack(">II", png_bytes[16:24])
             self.assertEqual((w, h), (expected_size, expected_size))
 
+    def test_live_fetcher_parsing_normalization_and_sqlite_cache(self):
+        import live_fetcher
+
+        sample_csv = "\n".join([
+            "date,admin1,admin2,market,market_id,latitude,longitude,category,commodity,commodity_id,unit,priceflag,pricetype,currency,price,usdprice",
+            "#date,#adm1+name,#adm2+name,#loc+market+name,#loc+market+id,#geo+lat,#geo+lon,#item+type,#item+name,#item+code,#item+unit,#item+price+flag,#item+price+type,#currency,#value,#value+usd",
+            "2026-10-15,Borno,Maiduguri,Monday,1001,11.84,13.15,cereals and tubers,Rice (local),71,2.7 KG,aggregate,Retail,NGN,3190,2.2",
+            "2026-11-15,Borno,Maiduguri,Monday,1001,11.84,13.15,cereals and tubers,Rice (local),71,2.7 KG,aggregate,Retail,NGN,3240,2.3",
+            "2026-11-15,Yobe,Damaturu,Damaturu,1002,11.74,11.96,vegetables and fruits,Tomatoes,114,0.5 KG,aggregate,Retail,NGN,250,0.18",
+            "2026-11-15,Yobe,Damaturu,Damaturu,1002,11.74,11.96,oil and fats,Oil (palm),118,L,aggregate,Retail,NGN,2800,2.0",
+            "2026-11-15,Adamawa,Yola,Yola,1003,9.20,12.48,non-food,Fuel (petrol-gasoline),284,L,aggregate,Retail,NGN,1600,1.14",
+        ])
+
+        rows = live_fetcher.parse_wfp_csv_rows(sample_csv, months_back=2, fx_usd_ngn=1500.0)
+        self.assertEqual(len(rows), 5)
+        rice_nov = next(r for r in rows if r["commodity"] == "Rice (local)" and r["date"] == "2026-11-15")
+        self.assertEqual(rice_nov["mappedCommodityId"], "rice_ofada")
+        # 3240 * (50 / 2.7) = 60,000 NGN per 50kg bag
+        self.assertEqual(rice_nov["normalizedWholesaleNgn"], 60000.0)
+        self.assertEqual(rice_nov["usdPrice"], 2.16)
+
+        tomato_nov = next(r for r in rows if r["commodity"] == "Tomatoes")
+        self.assertEqual(tomato_nov["mappedCommodityId"], "tomatoes_basket")
+        # 250 * (45 / 0.5) = 22,500 NGN per 45kg basket
+        self.assertEqual(tomato_nov["normalizedWholesaleNgn"], 22500.0)
+
+        fuel_nov = next(r for r in rows if r["commodity"].startswith("Fuel"))
+        self.assertIsNone(fuel_nov["mappedCommodityId"])
+        self.assertIsNone(fuel_nov["normalizedWholesaleNgn"])
+
+        payload = live_fetcher.build_live_feed_payload(
+            wfp_rows=rows,
+            fx_data={"usdNgn": 1500.0, "gbpNgn": 1950.0, "eurNgn": 1620.0, "updatedAtUtc": "2026-11-16", "provider": "test"},
+            cpi_data={"year": "2025", "cpiPct": 23.01, "indicator": "FP.CPI.TOTL.ZG", "provider": "test"},
+        )
+        self.assertEqual(payload["latestSurveyDate"], "2026-11-15")
+        self.assertEqual(len(payload["commoditySummaries"]), 4)
+        self.assertEqual(payload["commoditySummaries"][0]["mappedCommodityId"] is not None, True)
+
+        sync_obs = live_fetcher.build_sync_observations(payload, target_market_id="dawanau_kano")
+        self.assertEqual(len(sync_obs), 3)
+        self.assertTrue(all(o["date"] == "2026-11-01" for o in sync_obs))
+        self.assertTrue(all(o["market_id"] == "dawanau_kano" for o in sync_obs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "live_snap.db")
+            self.assertIsNone(watchlist_store.get_latest_live_feed_snapshot(db_path=db))
+            watchlist_store.save_live_feed_snapshot(payload, db_path=db)
+            loaded = watchlist_store.get_latest_live_feed_snapshot(db_path=db)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded["latestSurveyDate"], "2026-11-15")
+            self.assertEqual(loaded["fx"]["usdNgn"], 1500.0)
+
 
 if __name__ == "__main__":
     unittest.main()

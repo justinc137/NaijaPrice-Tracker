@@ -32,6 +32,13 @@ ROUTES = [
         "description": "Analyze spot prices, 12-month moving averages, and 3-to-12 month forecast intervals across Nigerian markets.",
     },
     {
+        "slug": "/live-feeds",
+        "priority": "0.9",
+        "changefreq": "daily",
+        "title": "Live Nigerian Market Feeds & FX Parity",
+        "description": "Fetch real-time WFP Nigeria food price surveys, live USD/NGN spot FX parity, and World Bank CPI inflation data.",
+    },
+    {
         "slug": "/watchlists",
         "priority": "0.9",
         "changefreq": "daily",

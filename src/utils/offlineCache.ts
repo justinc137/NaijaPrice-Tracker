@@ -1,4 +1,4 @@
-export const CACHEABLE_GET_ENDPOINTS = new Set(["/api/meta", "/api/health"]);
+export const CACHEABLE_GET_ENDPOINTS = new Set(["/api/meta", "/api/health", "/api/live-feed"]);
 export const CACHEABLE_POST_ENDPOINTS = new Set([
   "/api/analyze",
   "/api/watchlists/list",

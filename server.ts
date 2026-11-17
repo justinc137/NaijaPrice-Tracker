@@ -300,6 +300,33 @@ async function startServer() {
     }
   });
 
+  app.get("/api/live-feed", async (_req, res) => {
+    try {
+      const result = await runPythonEngine("live_feed_get");
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post("/api/live-feed/fetch", async (req, res) => {
+    try {
+      const result = await runPythonEngine("live_feed_fetch", req.body ?? {});
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({ error: (err as Error).message });
+    }
+  });
+
+  app.post("/api/live-feed/sync", async (req, res) => {
+    try {
+      const result = await runPythonEngine("live_feed_sync_to_model", req.body ?? {});
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+    }
+  });
+
   app.post("/api/watchlists/list", async (req, res) => {
     try {
       const result = await runPythonEngine("watchlist_list", req.body ?? {});

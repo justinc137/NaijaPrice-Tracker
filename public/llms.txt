@@ -7,6 +7,7 @@ NaijaPrice Tracker helps Nigerian agro-traders, researchers, and students evalua
 ## Core Workspace Views
 
 - [Commodity Price Trajectory & Forecasting](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/price-forecast): Analyze spot prices, 12-month moving averages, and 3-to-12 month forecast intervals across Nigerian markets.
+- [Live Nigerian Market Feeds & FX Parity](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/live-feeds): Fetch real-time WFP Nigeria food price surveys, live USD/NGN spot FX parity, and World Bank CPI inflation data.
 - [Personalized Watchlists & Deviation Alerts](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/watchlists): Monitor custom combinations of Nigerian commodities and markets with SQLite-backed threshold alerts.
 - [Nigerian Commodity Seasonality Matrix](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/seasonality-matrix): Compare harvest gluts and lean-season price peaks across 12 calendar months for staple crops.
 - [Cross-Market Arbitrage & Transport Margin Calculator](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/market-arbitrage): Identify origin-to-destination price spreads across Lagos, Kano, Ibadan, Abuja, Aba, and Jos markets.
