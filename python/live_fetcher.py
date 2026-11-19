@@ -87,43 +87,38 @@ COMMODITY_CATALOG = {
     },
 }
 
+try:
+    from generate_dataset import MARKETS as _DATASET_MARKETS
+except ImportError:
+    _DATASET_MARKETS = [
+        {"id": "mile12_lagos", "name": "Mile 12 Market, Lagos", "state": "Lagos", "region": "South-West"},
+        {"id": "bodija_ibadan", "name": "Bodija Market, Ibadan", "state": "Oyo", "region": "South-West"},
+        {"id": "lafenwa_abeokuta", "name": "Lafenwa Market, Abeokuta", "state": "Ogun", "region": "South-West"},
+        {"id": "ariaria_aba", "name": "Relief Market, Aba", "state": "Abia", "region": "South-East"},
+        {"id": "ochanja_onitsha", "name": "Ochanja Market, Onitsha", "state": "Anambra", "region": "South-East"},
+        {"id": "ogbete_enugu", "name": "Ogbete Main Market, Enugu", "state": "Enugu", "region": "South-East"},
+        {"id": "oilmill_portharcourt", "name": "Oil Mill Market, Port Harcourt", "state": "Rivers", "region": "South-South"},
+        {"id": "oba_benin", "name": "Oba Market, Benin City", "state": "Edo", "region": "South-South"},
+        {"id": "watt_calabar", "name": "Watt Market, Calabar", "state": "Cross River", "region": "South-South"},
+        {"id": "wuse_abuja", "name": "Wuse Market, Abuja", "state": "FCT Abuja", "region": "North-Central"},
+        {"id": "terminus_jos", "name": "Terminus Market, Jos", "state": "Plateau", "region": "North-Central"},
+        {"id": "zakibiam_benue", "name": "Zaki Biam Yam Market, Benue", "state": "Benue", "region": "North-Central"},
+        {"id": "dawanau_kano", "name": "Dawanau Market, Kano", "state": "Kano", "region": "North-West"},
+        {"id": "kawo_kaduna", "name": "Kawo Market, Kaduna", "state": "Kaduna", "region": "North-West"},
+        {"id": "sokoto_central", "name": "Sokoto Central Market, Sokoto", "state": "Sokoto", "region": "North-West"},
+        {"id": "monday_maiduguri", "name": "Monday Market, Maiduguri", "state": "Borno", "region": "North-East"},
+        {"id": "gombe_main", "name": "Gombe Main Market, Gombe", "state": "Gombe", "region": "North-East"},
+        {"id": "jimeta_yola", "name": "Jimeta Modern Market, Yola", "state": "Adamawa", "region": "North-East"},
+    ]
+
 MARKET_CATALOG = {
-    "mile12_lagos": {
-        "id": "mile12_lagos",
-        "name": "Mile 12 Market, Lagos",
-        "state": "Lagos",
-        "region": "South-West",
-    },
-    "dawanau_kano": {
-        "id": "dawanau_kano",
-        "name": "Dawanau Market, Kano",
-        "state": "Kano",
-        "region": "North-West",
-    },
-    "bodija_ibadan": {
-        "id": "bodija_ibadan",
-        "name": "Bodija Market, Ibadan",
-        "state": "Oyo",
-        "region": "South-West",
-    },
-    "wuse_abuja": {
-        "id": "wuse_abuja",
-        "name": "Wuse Market, Abuja",
-        "state": "FCT Abuja",
-        "region": "North-Central",
-    },
-    "ariaria_aba": {
-        "id": "ariaria_aba",
-        "name": "Relief Market, Aba",
-        "state": "Abia",
-        "region": "South-East",
-    },
-    "terminus_jos": {
-        "id": "terminus_jos",
-        "name": "Terminus Market, Jos",
-        "state": "Plateau",
-        "region": "North-Central",
-    },
+    m["id"]: {
+        "id": m["id"],
+        "name": m["name"],
+        "state": m["state"],
+        "region": m["region"],
+    }
+    for m in _DATASET_MARKETS
 }
 
 _UNIT_RE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)\s*$")
@@ -207,10 +202,17 @@ def _http_get_text(url: str, timeout: int = 25) -> str:
         return raw.decode("utf-8", errors="replace")
 
 
+def _http_get_json(url: str, timeout: int = 15, provider_label: str = "external provider"):
+    raw = _http_get_text(url, timeout=timeout)
+    stripped = raw.lstrip()
+    if not stripped or stripped.startswith("<"):
+        raise ValueError(f"{provider_label} returned an HTML/non-JSON response.")
+    return json.loads(stripped)
+
+
 def fetch_fx_rates(timeout: int = 12) -> dict:
     """Fetch live USD/NGN/GBP/EUR exchange rates from ExchangeRate-API."""
-    raw = _http_get_text(FX_API_URL, timeout=timeout)
-    data = json.loads(raw)
+    data = _http_get_json(FX_API_URL, timeout=timeout, provider_label="ExchangeRate-API")
     if data.get("result") != "success":
         raise ValueError("FX provider returned unsuccessful status.")
     rates = data.get("rates") or {}
@@ -230,8 +232,7 @@ def fetch_fx_rates(timeout: int = 12) -> dict:
 
 def fetch_worldbank_cpi(timeout: int = 12) -> dict:
     """Fetch Nigeria annual consumer price inflation (%) from World Bank Open Data."""
-    raw = _http_get_text(WORLDBANK_CPI_URL, timeout=timeout)
-    payload = json.loads(raw)
+    payload = _http_get_json(WORLDBANK_CPI_URL, timeout=timeout, provider_label="World Bank API")
     if not isinstance(payload, list) or len(payload) < 2 or not isinstance(payload[1], list):
         raise ValueError("Unexpected World Bank CPI payload structure.")
     for entry in payload[1]:
@@ -248,8 +249,7 @@ def fetch_worldbank_cpi(timeout: int = 12) -> dict:
 
 def resolve_wfp_csv_resource(timeout: int = 15) -> dict:
     """Resolve the live WFP Nigeria Food Prices CSV resource URL from HDX CKAN API."""
-    raw = _http_get_text(CKAN_WFP_PACKAGE_URL, timeout=timeout)
-    pkg = json.loads(raw)
+    pkg = _http_get_json(CKAN_WFP_PACKAGE_URL, timeout=timeout, provider_label="HDX CKAN API")
     if not pkg.get("success"):
         raise ValueError("HDX CKAN API returned unsuccessful response.")
     result = pkg.get("result") or {}
@@ -505,6 +505,25 @@ def build_sync_observations(
 
     allowed = set(commodity_ids) if commodity_ids else None
     summaries = snapshot.get("commoditySummaries") or []
+    quotes = snapshot.get("quotes") or []
+    target_state_norm = market["state"].replace("FCT ", "").strip().lower()
+
+    # Collect state-specific quotes from the latest survey month when available for higher local precision
+    latest_month = str(snapshot.get("latestSurveyDate") or "")[:7]
+    state_quotes_by_cid = defaultdict(list)
+    for q in quotes:
+        cid = q.get("mappedCommodityId")
+        norm_price = q.get("normalizedWholesaleNgn")
+        if not cid or norm_price is None or norm_price <= 0:
+            continue
+        if allowed is not None and cid not in allowed:
+            continue
+        q_state = str(q.get("state") or "").strip().lower()
+        q_date = str(q.get("date") or "")
+        if latest_month and not q_date.startswith(latest_month):
+            continue
+        if q_state == target_state_norm or target_state_norm in q_state:
+            state_quotes_by_cid[cid].append(float(norm_price))
 
     # Pick highest-quote summary per mappedCommodityId (e.g. Beans (red) vs Beans (white))
     best_by_cid = {}
@@ -526,6 +545,12 @@ def build_sync_observations(
         if len(survey_date) < 7:
             continue
         month_start = f"{survey_date[:7]}-01"
+        state_vals = state_quotes_by_cid.get(cid)
+        if state_vals:
+            raw_ngn = statistics.mean(state_vals)
+            price_ngn = float(max(50.0, round(raw_ngn / 50.0) * 50.0))
+        else:
+            price_ngn = float(round(s["normalizedWholesaleNgn"]))
         observations.append({
             "date": month_start,
             "commodity_id": cid,
@@ -536,7 +561,7 @@ def build_sync_observations(
             "market_name": market["name"],
             "state": market["state"],
             "region": market["region"],
-            "price_ngn": float(round(s["normalizedWholesaleNgn"])),
+            "price_ngn": price_ngn,
         })
 
     observations.sort(key=lambda r: r["commodity_id"])

@@ -6,6 +6,7 @@ import type {
   MarketMeta,
 } from "../types/market";
 import { formatNaira, formatPeriodLabel } from "../utils/formatters";
+import { MarketSelectOptions } from "./MarketSelectOptions";
 
 interface LiveMarketFeedViewProps {
   snapshot: LiveFeedSnapshot | null;
@@ -274,11 +275,7 @@ export const LiveMarketFeedView: React.FC<LiveMarketFeedViewProps> = ({
                   onChange={(e) => setTargetMarketId(e.target.value)}
                   className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 >
-                  {markets.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
+                  <MarketSelectOptions markets={markets} />
                 </select>
 
                 <button

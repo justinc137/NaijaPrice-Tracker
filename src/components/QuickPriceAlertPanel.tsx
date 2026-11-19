@@ -3,6 +3,7 @@ import { Bell, BellRing, X } from "lucide-react";
 import type { CommodityMeta, MarketMeta } from "../types/market";
 import type { NewAlertRulePayload } from "./WatchlistView";
 import { formatNaira } from "../utils/formatters";
+import { MarketSelectOptions } from "./MarketSelectOptions";
 
 interface QuickPriceAlertPanelProps {
   commodities: CommodityMeta[];
@@ -174,11 +175,7 @@ export const QuickPriceAlertPanel: React.FC<QuickPriceAlertPanelProps> = ({
             onChange={(e) => setMarketId(e.target.value)}
             className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
           >
-            {markets.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
+            <MarketSelectOptions markets={markets} />
           </select>
         </div>
 

@@ -21,6 +21,7 @@ import { DataLedgerView } from "./components/DataLedgerView";
 import { LiveMarketFeedView } from "./components/LiveMarketFeedView";
 import { LivePriceInputPanel } from "./components/LivePriceInputPanel";
 import { MarketArbitrageView } from "./components/MarketArbitrageView";
+import { MarketSelectOptions } from "./components/MarketSelectOptions";
 import { ModelComparisonPanel } from "./components/ModelComparisonPanel";
 import { PriceTrendChart } from "./components/PriceTrendChart";
 import { QuickPriceAlertPanel } from "./components/QuickPriceAlertPanel";
@@ -53,6 +54,7 @@ import {
 } from "./utils/formatters";
 import { findNewlyTriggeredAlerts, getAlertNotificationKey } from "./utils/forecastHelpers";
 import { loadOfflineSnapshot, mirrorJsonToSwCache, saveOfflineSnapshot } from "./utils/offlineCache";
+import { parseJsonResponse } from "./utils/safeFetchJson";
 import {
   ROUTE_SEO_LIST,
   applyDocumentSeo,
@@ -256,10 +258,7 @@ export default function App() {
       setMeta((prev) => prev ?? cachedMeta.value);
     }
     fetch("/api/meta")
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load Nigerian commodity metadata");
-        return res.json();
-      })
+      .then((res) => parseJsonResponse<DatasetMetaResponse>(res, "loading commodity metadata"))
       .then((data: DatasetMetaResponse) => {
         if (!active) return;
         setMeta(data);
@@ -280,7 +279,11 @@ export default function App() {
   useEffect(() => {
     let active = true;
     fetch("/api/observations")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) =>
+        res.ok
+          ? parseJsonResponse<{ observations?: CustomPriceRecord[] }>(res, "loading observations")
+          : null
+      )
       .then((data: { observations?: CustomPriceRecord[] } | null) => {
         if (!active || !data || !Array.isArray(data.observations)) return;
         setCustomRecords(data.observations);
@@ -297,7 +300,11 @@ export default function App() {
   useEffect(() => {
     let active = true;
     fetch("/api/live-feed")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) =>
+        res.ok
+          ? parseJsonResponse<{ snapshot?: LiveFeedSnapshot | null }>(res, "loading cached live feed")
+          : null
+      )
       .then((data: { snapshot?: LiveFeedSnapshot | null } | null) => {
         if (!active || !data || !data.snapshot) return;
         setLiveSnapshot(data.snapshot);
@@ -384,7 +391,7 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) return;
-      const data = (await res.json()) as AlertsResponse;
+      const data = await parseJsonResponse<AlertsResponse>(res, "evaluating alerts");
       setAlertRules(data.rules);
       applyAlertUpdate(data.alerts, emitNotifications);
       if (!res.headers.get("X-NaijaPrice-Cache")) {
@@ -408,7 +415,7 @@ export default function App() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) return;
-      const data = (await res.json()) as WatchlistsResponse;
+      const data = await parseJsonResponse<WatchlistsResponse>(res, "loading watchlists");
       setWatchlists(data.watchlists);
       setActiveWatchlistId((prev) =>
         data.watchlists.some((w) => w.id === prev)
@@ -444,11 +451,14 @@ export default function App() {
         }),
       });
       const cacheHeader = res.headers.get("X-NaijaPrice-Cache");
-      const data = await res.json();
+      const data = await parseJsonResponse<AnalysisResponse & { error?: string }>(
+        res,
+        "running market analysis"
+      );
       if (!res.ok || data.error) {
         throw new Error(data.error || "Python analysis engine returned an error.");
       }
-      setAnalysis(data as AnalysisResponse);
+      setAnalysis(data);
       if (cacheHeader === "offline-latest") {
         setCacheMode("offline-latest");
       } else if (cacheHeader === "offline") {
@@ -508,7 +518,10 @@ export default function App() {
         customRecords,
       }),
     });
-    const data = await res.json();
+    const data = await parseJsonResponse<WatchlistsResponse & { created?: { id?: string }; error?: string }>(
+      res,
+      "creating watchlist"
+    );
     if (!res.ok || data.error) {
       throw new Error(data.error || "Failed to create watchlist");
     }
@@ -526,7 +539,7 @@ export default function App() {
       body: JSON.stringify({ forecastMonths, modelType, customRecords }),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as WatchlistsResponse;
+    const data = await parseJsonResponse<WatchlistsResponse>(res, "deleting watchlist");
     setWatchlists(data.watchlists);
     setActiveWatchlistId(data.watchlists[0]?.id ?? "");
     await loadAlerts();
@@ -549,7 +562,7 @@ export default function App() {
       }),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as WatchlistsResponse;
+    const data = await parseJsonResponse<WatchlistsResponse>(res, "updating watchlist");
     setWatchlists(data.watchlists);
     await loadAlerts();
   };
@@ -564,7 +577,10 @@ export default function App() {
         customRecords,
       }),
     });
-    const data = await res.json();
+    const data = await parseJsonResponse<AlertsResponse & { error?: string }>(
+      res,
+      "creating alert rule"
+    );
     if (!res.ok || data.error) {
       throw new Error(data.error || "Failed to create alert rule");
     }
@@ -579,7 +595,7 @@ export default function App() {
       body: JSON.stringify({ enabled, activeWatchlistId, customRecords }),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as AlertsResponse;
+    const data = await parseJsonResponse<AlertsResponse>(res, "updating alert rule");
     setAlertRules(data.rules);
     applyAlertUpdate(data.alerts, enabled);
   };
@@ -591,7 +607,7 @@ export default function App() {
       body: JSON.stringify({ activeWatchlistId, customRecords }),
     });
     if (!res.ok) return;
-    const data = (await res.json()) as AlertsResponse;
+    const data = await parseJsonResponse<AlertsResponse>(res, "deleting alert rule");
     setAlertRules(data.rules);
     applyAlertUpdate(data.alerts, false);
   };
@@ -606,11 +622,14 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ records: newRows }),
     });
-    const data = await res.json();
+    const data = await parseJsonResponse<{ observations?: CustomPriceRecord[]; error?: string }>(
+      res,
+      "saving market observation"
+    );
     if (!res.ok || data.error) {
       throw new Error(data.error || "Failed to save market observation");
     }
-    const updatedObs = (data.observations ?? []) as CustomPriceRecord[];
+    const updatedObs = data.observations ?? [];
     setCustomRecords(updatedObs);
     // Evaluate alerts immediately against newly submitted observations so notifications fire cleanly
     const evalPayload = { activeWatchlistId, customRecords: updatedObs };
@@ -620,7 +639,7 @@ export default function App() {
       body: JSON.stringify(evalPayload),
     });
     if (evalRes.ok) {
-      const evalData = (await evalRes.json()) as AlertsResponse;
+      const evalData = await parseJsonResponse<AlertsResponse>(evalRes, "evaluating alerts");
       setAlertRules(evalData.rules);
       applyAlertUpdate(evalData.alerts, true);
     }
@@ -631,7 +650,10 @@ export default function App() {
       method: "DELETE",
     });
     if (!res.ok) return;
-    const data = (await res.json()) as { observations?: CustomPriceRecord[] };
+    const data = await parseJsonResponse<{ observations?: CustomPriceRecord[] }>(
+      res,
+      "deleting observation"
+    );
     if (Array.isArray(data.observations)) {
       setCustomRecords(data.observations);
     }
@@ -654,11 +676,14 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ monthsBack: 3 }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse<{ snapshot?: LiveFeedSnapshot; error?: string }>(
+        res,
+        "fetching live external market data"
+      );
       if (!res.ok || data.error || !data.snapshot) {
         throw new Error(data.error || "Unable to fetch external live market feeds.");
       }
-      const nextSnap = data.snapshot as LiveFeedSnapshot;
+      const nextSnap = data.snapshot;
       setLiveSnapshot(nextSnap);
       saveOfflineSnapshot(OFFLINE_LIVE_FEED_KEY, nextSnap);
       void mirrorJsonToSwCache("/api/live-feed", "", { snapshot: nextSnap });
@@ -690,11 +715,15 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetMarketId, commodityIds }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse<{
+        observations?: CustomPriceRecord[];
+        syncedCount?: number;
+        error?: string;
+      }>(res, "syncing live quotes into forecast model");
       if (!res.ok || data.error) {
         throw new Error(data.error || "Failed to sync live market quotes into forecast model.");
       }
-      const updatedObs = (data.observations ?? []) as CustomPriceRecord[];
+      const updatedObs = data.observations ?? [];
       setCustomRecords(updatedObs);
       setMarketId(targetMarketId);
       const count = Number(data.syncedCount ?? 0);
@@ -710,7 +739,7 @@ export default function App() {
         body: JSON.stringify(evalPayload),
       });
       if (evalRes.ok) {
-        const evalData = (await evalRes.json()) as AlertsResponse;
+        const evalData = await parseJsonResponse<AlertsResponse>(evalRes, "evaluating alerts");
         setAlertRules(evalData.rules);
         applyAlertUpdate(evalData.alerts, true);
       }
@@ -862,12 +891,13 @@ export default function App() {
                 onChange={(e) => setMarketId(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
-                {(meta?.markets ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
+                <MarketSelectOptions markets={meta?.markets ?? []} />
               </select>
+              {activeMarket && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  {activeMarket.state} · {activeMarket.region}
+                </p>
+              )}
             </div>
 
             <div>
@@ -923,7 +953,9 @@ export default function App() {
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 space-y-1">
           <div className="font-medium text-slate-700 dark:text-slate-300">Dataset Coverage</div>
           <div className="font-mono tabular-nums">
-            {meta ? `${meta.totalRecords.toLocaleString()} rows · ${meta.dateRange.months} mos` : "Loading dataset..."}
+            {meta
+              ? `${meta.markets.length} mkts · ${meta.totalRecords.toLocaleString()} rows · ${meta.dateRange.months}m`
+              : "Loading dataset..."}
           </div>
           {customRecords.length > 0 && (
             <div className="text-emerald-700 dark:text-emerald-400 font-medium">
@@ -1369,19 +1401,35 @@ export default function App() {
                               </a>
                             </div>
                             <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                              {analysis.marketComparison.slice(0, 4).map((m) => (
-                                <div
-                                  key={m.marketId}
-                                  className="py-2 flex items-center justify-between gap-2"
-                                >
-                                  <span className="text-slate-700 dark:text-slate-300 truncate">
-                                    {m.marketName}
-                                  </span>
-                                  <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                                    {formatNaira(m.price_ngn)}
-                                  </span>
-                                </div>
-                              ))}
+                              {(() => {
+                                const list = analysis.marketComparison;
+                                const preview =
+                                  list.length <= 5
+                                    ? list
+                                    : [...list.slice(0, 2), ...list.slice(-2)];
+                                return preview.map((m, idx) => {
+                                  const isOrigin = idx === 0;
+                                  const isPeak = idx === preview.length - 1 && preview.length > 1;
+                                  return (
+                                    <div
+                                      key={m.marketId}
+                                      className="py-2 flex items-center justify-between gap-2"
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => setMarketId(m.marketId)}
+                                        className="text-left text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-400 truncate"
+                                      >
+                                        {m.marketName}
+                                        {isOrigin ? " (Low)" : isPeak ? " (High)" : ""}
+                                      </button>
+                                      <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                                        {formatNaira(m.price_ngn)}
+                                      </span>
+                                    </div>
+                                  );
+                                });
+                              })()}
                             </div>
                           </div>
                         </div>

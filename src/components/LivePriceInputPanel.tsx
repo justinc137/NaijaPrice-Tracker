@@ -4,6 +4,7 @@ import type { CommodityMeta, CustomPriceRecord, MarketMeta } from "../types/mark
 import { parseCustomPriceCsv } from "../utils/csvParser";
 import { buildCsvUploadTemplate } from "../utils/forecastHelpers";
 import { formatNaira } from "../utils/formatters";
+import { MarketSelectOptions } from "./MarketSelectOptions";
 
 interface LivePriceInputPanelProps {
   commodities: CommodityMeta[];
@@ -236,11 +237,7 @@ export const LivePriceInputPanel: React.FC<LivePriceInputPanelProps> = ({
             onChange={(e) => setEntryMarket(e.target.value)}
             className="w-full px-2.5 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
-            {markets.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
+            <MarketSelectOptions markets={markets} />
           </select>
         </div>
 

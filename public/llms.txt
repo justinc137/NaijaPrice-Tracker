@@ -2,7 +2,7 @@
 
 > Interactive Nigerian agricultural commodity price analytics, seasonality decomposition, multi-model forecasting, SQLite watchlists, threshold deviation alerts, and exportable PDF market intelligence briefs.
 
-NaijaPrice Tracker helps Nigerian agro-traders, researchers, and students evaluate wholesale/retail Naira (NGN) commodity trajectories across six regional hubs (Mile 12 Lagos, Dawanau Kano, Bodija Ibadan, Wuse Abuja, Relief Market Aba, and Terminus Market Jos) using a Python analytics engine.
+NaijaPrice Tracker helps Nigerian agro-traders, researchers, and students evaluate wholesale/retail Naira (NGN) commodity trajectories across 18 regional hubs spanning all 6 geopolitical zones (Lagos, Ibadan, Abeokuta, Aba, Onitsha, Enugu, Port Harcourt, Benin City, Calabar, Abuja, Jos, Zaki Biam, Kano, Kaduna, Sokoto, Maiduguri, Gombe, and Yola) using a Python analytics engine.
 
 ## Core Workspace Views
 
@@ -10,8 +10,8 @@ NaijaPrice Tracker helps Nigerian agro-traders, researchers, and students evalua
 - [Live Nigerian Market Feeds & FX Parity](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/live-feeds): Fetch real-time WFP Nigeria food price surveys, live USD/NGN spot FX parity, and World Bank CPI inflation data.
 - [Personalized Watchlists & Deviation Alerts](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/watchlists): Monitor custom combinations of Nigerian commodities and markets with SQLite-backed threshold alerts.
 - [Nigerian Commodity Seasonality Matrix](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/seasonality-matrix): Compare harvest gluts and lean-season price peaks across 12 calendar months for staple crops.
-- [Cross-Market Arbitrage & Transport Margin Calculator](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/market-arbitrage): Identify origin-to-destination price spreads across Lagos, Kano, Ibadan, Abuja, Aba, and Jos markets.
-- [Market Price Data Ledger & CSV Survey Import](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/data-ledger): Browse 2,784 monthly Nigerian market observations or upload local field survey CSV prices.
+- [Cross-Market Arbitrage & Transport Margin Calculator](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/market-arbitrage): Identify origin-to-destination price spreads across 18 Nigerian markets spanning all 6 geopolitical zones.
+- [Market Price Data Ledger & CSV Survey Import](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/data-ledger): Browse 8,352 monthly Nigerian market observations or upload local field survey CSV prices.
 - [Commodity Intelligence Briefs, PDF Export & Python Source](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/reports-python): Download formal PDF market intelligence briefs, forecast CSVs, and the standalone Streamlit/Pandas/Scikit-learn script.
 
 ## Tracked Commodities (2022–2026 Monthly Series)
@@ -28,11 +28,11 @@ NaijaPrice Tracker helps Nigerian agro-traders, researchers, and students evalua
 ## Quantitative Methodology
 
 - **Seasonal Decomposition**: Centered 12-month moving-average multiplicative decomposition identifying harvest gluts and lean-season peaks.
-- **Forecasting Models**: Ridge Linear + Seasonal Dummies, Polynomial + Fourier Harmonics, and Multiplicative Holt-Winters with 6-month holdout backtesting (MAE, RMSE, MAPE).
-- **Alerts & Persistence**: SQLite-backed custom watchlists and threshold alerts comparing spot prices against trailing 12-month averages, OLS trendlines, and all-time means.
+- **Forecasting Models**: Ridge Linear + Seasonal Dummies, Polynomial + Fourier Harmonics, Multiplicative Holt-Winters, Seasonal ARIMA, and Prophet GAM with 6-month holdout backtesting (MAE, RMSE, MAPE).
+- **Alerts & Persistence**: SQLite-backed custom watchlists and threshold alerts comparing spot prices against trailing 12-month averages, OLS trendlines, all-time means, and Naira targets.
 
 ## Machine-Readable & Export Resources
 
 - [XML Sitemap](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/sitemap.xml): Canonical URL index for all application routes.
-- [Historical Commodity Dataset CSV](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/api/export/dataset): 2,784 monthly NGN observations (Jan 2022–Oct 2026).
+- [Historical Commodity Dataset CSV](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/api/export/dataset): 8,352 monthly NGN observations across 18 markets (Jan 2022–Oct 2026).
 - [Standalone Streamlit App (Python)](https://ais-dev-o6pm3tgzkbaidkcj3kkj5h-561724815819.europe-west1.run.app/api/export/streamlit): Portable Pandas, Plotly, and Scikit-learn companion script.

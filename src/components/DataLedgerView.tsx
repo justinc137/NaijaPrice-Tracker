@@ -9,6 +9,8 @@ import type {
 import { parseCustomPriceCsv } from "../utils/csvParser";
 import { buildCsvUploadTemplate } from "../utils/forecastHelpers";
 import { formatNaira, formatPeriodLabel } from "../utils/formatters";
+import { parseJsonResponse } from "../utils/safeFetchJson";
+import { MarketSelectOptions } from "./MarketSelectOptions";
 
 interface DataLedgerViewProps {
   commodities: CommodityMeta[];
@@ -62,8 +64,10 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
             customRecords,
           }),
         });
-        const data = (await res.json()) as LedgerResponse;
+        const data = await parseJsonResponse<LedgerResponse>(res, "loading market price ledger");
         if (active) setLedgerData(data);
+      } catch {
+        // Keep previously loaded ledger rows on transient network/proxy HTML response
       } finally {
         if (active) setLoading(false);
       }
@@ -226,11 +230,7 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               onChange={(e) => setEntryMarket(e.target.value)}
               className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600"
             >
-              {markets.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
+              <MarketSelectOptions markets={markets} />
             </select>
           </div>
           <div>
@@ -323,12 +323,8 @@ export const DataLedgerView: React.FC<DataLedgerViewProps> = ({
               }}
               className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
             >
-              <option value="all">All Markets</option>
-              {markets.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
+              <option value="all">All Markets ({markets.length})</option>
+              <MarketSelectOptions markets={markets} />
             </select>
 
             <select

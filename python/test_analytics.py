@@ -14,8 +14,13 @@ class TestAnalyticsEngine(unittest.TestCase):
     def test_meta_contains_commodities_and_markets(self):
         meta = compute_meta(self.rows)
         self.assertEqual(len(meta["commodities"]), 8)
-        self.assertEqual(len(meta["markets"]), 6)
-        self.assertGreater(meta["totalRecords"], 2500)
+        self.assertEqual(len(meta["markets"]), 18)
+        regions = {m["region"] for m in meta["markets"]}
+        self.assertEqual(
+            regions,
+            {"South-West", "South-East", "South-South", "North-Central", "North-West", "North-East"},
+        )
+        self.assertGreater(meta["totalRecords"], 8000)
 
     def test_analyze_ridge_seasonal_forecast_and_seasonality(self):
         res = analyze(self.rows, {
@@ -307,6 +312,11 @@ class TestAnalyticsEngine(unittest.TestCase):
         self.assertEqual(len(sync_obs), 3)
         self.assertTrue(all(o["date"] == "2026-11-01" for o in sync_obs))
         self.assertTrue(all(o["market_id"] == "dawanau_kano" for o in sync_obs))
+
+        borno_obs = live_fetcher.build_sync_observations(payload, target_market_id="monday_maiduguri")
+        self.assertEqual(len(borno_obs), 3)
+        self.assertTrue(all(o["market_id"] == "monday_maiduguri" for o in borno_obs))
+        self.assertTrue(all(o["region"] == "North-East" for o in borno_obs))
 
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, "live_snap.db")

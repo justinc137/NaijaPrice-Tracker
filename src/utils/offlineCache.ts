@@ -69,7 +69,7 @@ export async function mirrorJsonToSwCache(
 ): Promise<void> {
   if (typeof window === "undefined" || !("caches" in window)) return;
   try {
-    const cache = await caches.open("naijaprice-analysis-v1");
+    const cache = await caches.open("naijaprice-analysis-v2");
     const keyUrl = buildSwCacheKeyUrl(pathname, bodyText, window.location.origin);
     const json = JSON.stringify(payload);
     const makeResp = () =>
@@ -91,7 +91,7 @@ export async function mirrorJsonToSwCache(
 export async function warmLoadedStaticAssetsToCache(): Promise<void> {
   if (typeof window === "undefined" || !("caches" in window)) return;
   try {
-    const cache = await caches.open("naijaprice-static-v1");
+    const cache = await caches.open("naijaprice-static-v2");
     const origin = window.location.origin;
     const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
     const staticUrls = new Set<string>([window.location.href]);

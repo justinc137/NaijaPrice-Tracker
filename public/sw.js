@@ -1,8 +1,8 @@
 /* NaijaPrice Tracker Service Worker — Static Shell + Latest Market Analysis Offline Cache */
 
-const STATIC_CACHE = "naijaprice-static-v1";
-const ANALYSIS_CACHE = "naijaprice-analysis-v1";
-const FONTS_CACHE = "naijaprice-fonts-v1";
+const STATIC_CACHE = "naijaprice-static-v2";
+const ANALYSIS_CACHE = "naijaprice-analysis-v2";
+const FONTS_CACHE = "naijaprice-fonts-v2";
 const ACTIVE_CACHES = new Set([STATIC_CACHE, ANALYSIS_CACHE, FONTS_CACHE]);
 
 const PRECACHE_URLS = [
@@ -91,6 +91,21 @@ self.addEventListener("message", (event) => {
   }
 });
 
+async function isValidJsonApiResponse(res) {
+  if (!res) return false;
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("text/html")) return false;
+  if (!ct.includes("json")) {
+    try {
+      const text = (await res.clone().text()).trim();
+      if (!text || text.startsWith("<")) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function handleCacheableApi(request, pathname) {
   const cache = await caches.open(ANALYSIS_CACHE);
   let cacheKeyUrl = new URL("/__sw_cache" + pathname, self.location.origin).toString();
@@ -113,19 +128,26 @@ async function handleCacheableApi(request, pathname) {
       ? new URL("/__sw_cache/api/watchlists/list/latest", self.location.origin).toString()
       : null;
 
-  const cachedExact = await cache.match(cacheKeyUrl, { ignoreVary: true });
-  const cachedLatest = latestFallbackKey
+  const rawCachedExact = await cache.match(cacheKeyUrl, { ignoreVary: true });
+  const cachedExact = (await isValidJsonApiResponse(rawCachedExact)) ? rawCachedExact : undefined;
+  const rawCachedLatest = latestFallbackKey
     ? await cache.match(latestFallbackKey, { ignoreVary: true })
     : undefined;
+  const cachedLatest = (await isValidJsonApiResponse(rawCachedLatest)) ? rawCachedLatest : undefined;
   const fallbackMatch = cachedExact || cachedLatest;
 
   // In low-connectivity environments, if a cached payload exists, race network with a 4.5s timeout
   const networkPromise = fetch(networkRequest).then(async (res) => {
-    if (res && res.ok) {
+    const validJson = await isValidJsonApiResponse(res);
+    if (res && res.ok && validJson) {
       await cache.put(cacheKeyUrl, res.clone());
       if (latestFallbackKey) {
         await cache.put(latestFallbackKey, res.clone());
       }
+      return res;
+    }
+    if (!validJson) {
+      throw new Error("Non-JSON response received from API");
     }
     return res;
   });
@@ -159,7 +181,7 @@ async function handleCacheableApi(request, pathname) {
   } catch {
     return new Response(
       JSON.stringify({
-        error: "Offline mode: no cached market analysis is available for this query yet.",
+        error: "Unable to reach market analytics API right now, and no cached data is available yet.",
       }),
       {
         status: 503,

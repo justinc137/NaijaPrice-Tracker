@@ -1,6 +1,7 @@
 import express from "express";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
@@ -99,7 +100,7 @@ function runPythonEngine<T>(command: string, payload: Record<string, unknown> = 
 async function startServer() {
   const app = express();
   app.set("trust proxy", true);
-  app.use(express.json({ limit: "4mb" }));
+  app.use(express.json({ limit: "10mb" }));
 
   // Enforce HTTPS for non-localhost production requests and attach transport security headers
   app.use((req, res, next) => {
@@ -472,9 +473,35 @@ async function startServer() {
     }
   });
 
+  // Ensure unknown /api/* routes or Express body/middleware errors always return JSON, never HTML
+  app.use("/api", (req, res) => {
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
+  });
+
+  app.use(
+    (
+      err: Error & { status?: number; statusCode?: number },
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction
+    ) => {
+      if (req.path.startsWith("/api/") || req.path === "/api") {
+        const status = err.status || err.statusCode || 500;
+        res.status(status).json({ error: err.message || "Internal server error" });
+        return;
+      }
+      next(err);
+    }
+  );
+
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ws: { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -483,6 +510,10 @@ async function startServer() {
     app.use(express.static(distDir, { maxAge: "1d" }));
     app.get("/{*path}", (req, res) => {
       const indexPath = path.join(distDir, "index.html");
+      if (!fs.existsSync(indexPath)) {
+        res.status(503).send("Application build not found. Run npm run build first.");
+        return;
+      }
       let html = fs.readFileSync(indexPath, "utf-8");
       const baseUrl = resolveBaseUrl(req);
       const token = (process.env.GOOGLE_SITE_VERIFICATION || "").trim();
@@ -498,7 +529,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`NaijaPrice Tracker server running on http://localhost:${PORT}`);
   });
 }

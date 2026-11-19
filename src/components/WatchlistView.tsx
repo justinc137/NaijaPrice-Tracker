@@ -12,6 +12,8 @@ import type {
   WatchlistItem,
 } from "../types/market";
 import { formatNaira, formatPercent, formatPeriodLabel } from "../utils/formatters";
+import { groupMarketsByRegion } from "../utils/marketHelpers";
+import { MarketSelectOptions } from "./MarketSelectOptions";
 
 export interface NewAlertRulePayload {
   name: string;
@@ -281,11 +283,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                     onChange={(e) => setQuickMarket(e.target.value)}
                     className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-lg"
                   >
-                    {markets.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
+                    <MarketSelectOptions markets={markets} />
                   </select>
                 </div>
                 <button
@@ -506,28 +504,37 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                   {selectedMarkets.length === markets.length ? "Clear all" : "Select all"}
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {markets.map((m) => {
-                  const checked = selectedMarkets.includes(m.id);
-                  return (
-                    <label
-                      key={m.id}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                        checked
-                          ? "bg-emerald-50/70 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-slate-900 dark:text-slate-100 font-medium"
-                          : "bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleMarketChoice(m.id)}
-                        className="rounded border-slate-300 dark:border-slate-600 text-emerald-700 focus:ring-emerald-600"
-                      />
-                      <span className="truncate">{m.name}</span>
-                    </label>
-                  );
-                })}
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                {groupMarketsByRegion(markets).map((grp) => (
+                  <div key={grp.region} className="space-y-1.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      {grp.region}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {grp.markets.map((m) => {
+                        const checked = selectedMarkets.includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                              checked
+                                ? "bg-emerald-50/70 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-slate-900 dark:text-slate-100 font-medium"
+                                : "bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleMarketChoice(m.id)}
+                              className="rounded border-slate-300 dark:border-slate-600 text-emerald-700 focus:ring-emerald-600"
+                            />
+                            <span className="truncate">{m.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -861,11 +868,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                 <option value="all">
                   {ruleType === "price_target" ? "All Markets" : "All Monitored Markets"}
                 </option>
-                {markets.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
+                <MarketSelectOptions markets={markets} />
               </select>
             </div>
           </form>

@@ -52,7 +52,7 @@ export const ROUTE_SEO_LIST: RouteSeoMeta[] = [
     navLabel: "Market Arbitrage",
     title: "Cross-Market Arbitrage Calculator – NaijaPrice Tracker",
     description:
-      "Compare live price spreads across Lagos, Kano, Ibadan, Abuja, Aba, and Jos markets and estimate net inter-state transport margins.",
+      "Compare live price spreads across 18 Nigerian markets spanning all 6 geopolitical zones and estimate net inter-state transport margins.",
     h1: "Cross-Market Price Ranking & Arbitrage Margins",
   },
   {
@@ -61,7 +61,7 @@ export const ROUTE_SEO_LIST: RouteSeoMeta[] = [
     navLabel: "Data Ledger",
     title: "Market Price Data Ledger & CSV – NaijaPrice Tracker",
     description:
-      "Explore 2,784 monthly Nigerian agricultural commodity price observations or upload local field survey CSV datasets for analysis.",
+      "Explore 8,352 monthly Nigerian agricultural commodity price observations or upload local field survey CSV datasets for analysis.",
     h1: "Nigerian Market Price Data Ledger & Survey Import",
   },
   {

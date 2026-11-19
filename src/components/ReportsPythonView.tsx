@@ -8,6 +8,7 @@ import {
   formatPeriodLabel,
   getModelLabel,
 } from "../utils/formatters";
+import { parseJsonResponse } from "../utils/safeFetchJson";
 
 interface ReportsPythonViewProps {
   analysis: AnalysisResponse;
@@ -65,7 +66,10 @@ export const ReportsPythonView: React.FC<ReportsPythonViewProps> = ({
         }),
       });
       if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
+        const errBody = await parseJsonResponse<{ error?: string }>(
+          res,
+          "generating PDF intelligence brief"
+        ).catch((parseErr: Error) => ({ error: parseErr.message }));
         throw new Error(errBody.error || "Failed to generate PDF brief.");
       }
       const blob = await res.blob();

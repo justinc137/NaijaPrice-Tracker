@@ -1,9 +1,9 @@
 """
 Deterministic dataset generator for NaijaPrice Tracker.
 Generates realistic monthly wholesale/retail agricultural commodity prices (NGN)
-across 6 major Nigerian markets from Jan 2022 to Oct 2026 (58 months),
-reflecting regional transport spreads, macro inflation dynamics, and crop-specific
-Nigerian harvest vs. lean-season price cycles.
+across 18 major Nigerian markets spanning all 6 geopolitical zones from Jan 2022
+to Oct 2026 (58 months), reflecting regional transport spreads, macro inflation
+dynamics, and crop-specific Nigerian harvest vs. lean-season price cycles.
 """
 
 import csv
@@ -111,19 +111,13 @@ COMMODITIES = [
 ]
 
 MARKETS = [
+    # South-West
     {
         "id": "mile12_lagos",
         "name": "Mile 12 Market, Lagos",
         "state": "Lagos",
         "region": "South-West",
         "logistics_factor": 1.12,
-    },
-    {
-        "id": "dawanau_kano",
-        "name": "Dawanau Market, Kano",
-        "state": "Kano",
-        "region": "North-West",
-        "logistics_factor": 0.89,
     },
     {
         "id": "bodija_ibadan",
@@ -133,12 +127,13 @@ MARKETS = [
         "logistics_factor": 1.03,
     },
     {
-        "id": "wuse_abuja",
-        "name": "Wuse Market, Abuja",
-        "state": "FCT Abuja",
-        "region": "North-Central",
-        "logistics_factor": 1.07,
+        "id": "lafenwa_abeokuta",
+        "name": "Lafenwa Market, Abeokuta",
+        "state": "Ogun",
+        "region": "South-West",
+        "logistics_factor": 1.02,
     },
+    # South-East
     {
         "id": "ariaria_aba",
         "name": "Relief Market, Aba",
@@ -147,32 +142,162 @@ MARKETS = [
         "logistics_factor": 1.05,
     },
     {
+        "id": "ochanja_onitsha",
+        "name": "Ochanja Market, Onitsha",
+        "state": "Anambra",
+        "region": "South-East",
+        "logistics_factor": 1.04,
+    },
+    {
+        "id": "ogbete_enugu",
+        "name": "Ogbete Main Market, Enugu",
+        "state": "Enugu",
+        "region": "South-East",
+        "logistics_factor": 1.01,
+    },
+    # South-South
+    {
+        "id": "oilmill_portharcourt",
+        "name": "Oil Mill Market, Port Harcourt",
+        "state": "Rivers",
+        "region": "South-South",
+        "logistics_factor": 1.14,
+    },
+    {
+        "id": "oba_benin",
+        "name": "Oba Market, Benin City",
+        "state": "Edo",
+        "region": "South-South",
+        "logistics_factor": 1.00,
+    },
+    {
+        "id": "watt_calabar",
+        "name": "Watt Market, Calabar",
+        "state": "Cross River",
+        "region": "South-South",
+        "logistics_factor": 1.06,
+    },
+    # North-Central
+    {
+        "id": "wuse_abuja",
+        "name": "Wuse Market, Abuja",
+        "state": "FCT Abuja",
+        "region": "North-Central",
+        "logistics_factor": 1.07,
+    },
+    {
         "id": "terminus_jos",
         "name": "Terminus Market, Jos",
         "state": "Plateau",
         "region": "North-Central",
         "logistics_factor": 0.92,
     },
+    {
+        "id": "zakibiam_benue",
+        "name": "Zaki Biam Yam Market, Benue",
+        "state": "Benue",
+        "region": "North-Central",
+        "logistics_factor": 0.90,
+    },
+    # North-West
+    {
+        "id": "dawanau_kano",
+        "name": "Dawanau Market, Kano",
+        "state": "Kano",
+        "region": "North-West",
+        "logistics_factor": 0.89,
+    },
+    {
+        "id": "kawo_kaduna",
+        "name": "Kawo Market, Kaduna",
+        "state": "Kaduna",
+        "region": "North-West",
+        "logistics_factor": 0.94,
+    },
+    {
+        "id": "sokoto_central",
+        "name": "Sokoto Central Market, Sokoto",
+        "state": "Sokoto",
+        "region": "North-West",
+        "logistics_factor": 0.91,
+    },
+    # North-East
+    {
+        "id": "monday_maiduguri",
+        "name": "Monday Market, Maiduguri",
+        "state": "Borno",
+        "region": "North-East",
+        "logistics_factor": 0.95,
+    },
+    {
+        "id": "gombe_main",
+        "name": "Gombe Main Market, Gombe",
+        "state": "Gombe",
+        "region": "North-East",
+        "logistics_factor": 0.91,
+    },
+    {
+        "id": "jimeta_yola",
+        "name": "Jimeta Modern Market, Yola",
+        "state": "Adamawa",
+        "region": "North-East",
+        "logistics_factor": 0.93,
+    },
 ]
 
 # Crop-region production advantages (lower local price near origin belt)
 ORIGIN_AFFINITY = {
+    ("rice_ofada", "lafenwa_abeokuta"): 0.88,
     ("rice_ofada", "bodija_ibadan"): 0.92,
+    ("rice_ofada", "zakibiam_benue"): 0.93,
     ("rice_ofada", "mile12_lagos"): 0.96,
+    ("rice_ofada", "ochanja_onitsha"): 0.97,
+    ("garri_white", "oba_benin"): 0.89,
     ("garri_white", "ariaria_aba"): 0.91,
+    ("garri_white", "lafenwa_abeokuta"): 0.92,
+    ("garri_white", "ogbete_enugu"): 0.93,
+    ("garri_white", "watt_calabar"): 0.93,
     ("garri_white", "bodija_ibadan"): 0.94,
+    ("beans_oloyin", "monday_maiduguri"): 0.88,
+    ("beans_oloyin", "gombe_main"): 0.90,
     ("beans_oloyin", "dawanau_kano"): 0.91,
+    ("beans_oloyin", "sokoto_central"): 0.91,
+    ("beans_oloyin", "oilmill_portharcourt"): 1.07,
+    ("maize_yellow", "kawo_kaduna"): 0.89,
+    ("maize_yellow", "gombe_main"): 0.90,
     ("maize_yellow", "dawanau_kano"): 0.92,
+    ("maize_yellow", "zakibiam_benue"): 0.92,
+    ("maize_yellow", "jimeta_yola"): 0.92,
     ("maize_yellow", "terminus_jos"): 0.94,
     ("tomatoes_basket", "dawanau_kano"): 0.85,
+    ("tomatoes_basket", "kawo_kaduna"): 0.86,
     ("tomatoes_basket", "terminus_jos"): 0.88,
+    ("tomatoes_basket", "gombe_main"): 0.89,
     ("tomatoes_basket", "mile12_lagos"): 1.08,
-    ("yam_tuber", "wuse_abuja"): 0.93,
+    ("tomatoes_basket", "watt_calabar"): 1.09,
+    ("tomatoes_basket", "oilmill_portharcourt"): 1.10,
+    ("yam_tuber", "zakibiam_benue"): 0.82,
     ("yam_tuber", "terminus_jos"): 0.91,
+    ("yam_tuber", "jimeta_yola"): 0.92,
+    ("yam_tuber", "wuse_abuja"): 0.93,
+    ("yam_tuber", "ogbete_enugu"): 0.93,
+    ("yam_tuber", "mile12_lagos"): 1.06,
+    ("yam_tuber", "sokoto_central"): 1.08,
+    ("palm_oil", "oba_benin"): 0.85,
     ("palm_oil", "ariaria_aba"): 0.86,
+    ("palm_oil", "watt_calabar"): 0.87,
+    ("palm_oil", "oilmill_portharcourt"): 0.90,
+    ("palm_oil", "ochanja_onitsha"): 0.91,
     ("palm_oil", "dawanau_kano"): 1.15,
+    ("palm_oil", "monday_maiduguri"): 1.16,
+    ("palm_oil", "sokoto_central"): 1.17,
+    ("onions_sokoto", "sokoto_central"): 0.81,
     ("onions_sokoto", "dawanau_kano"): 0.86,
+    ("onions_sokoto", "kawo_kaduna"): 0.89,
+    ("onions_sokoto", "monday_maiduguri"): 0.90,
     ("onions_sokoto", "mile12_lagos"): 1.09,
+    ("onions_sokoto", "watt_calabar"): 1.11,
+    ("onions_sokoto", "oilmill_portharcourt"): 1.12,
 }
 
 
